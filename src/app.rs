@@ -531,8 +531,15 @@ impl App {
             // pinned-agent header: not interactive
             Action::None
         } else if inside(&regions.files) {
-            let idx = self.files_scroll + (y - regions.files.y - 1) as usize;
             let len = self.files_tree_rows().len();
+            let files_viewport = if self.files_viewport > 0 {
+                self.files_viewport
+            } else {
+                regions.files.height.saturating_sub(2) as usize
+            };
+            // the same clamped top the renderer uses
+            let top = self.files_scroll.min(len.saturating_sub(files_viewport.max(1)));
+            let idx = top + (y - regions.files.y - 1) as usize;
             match m {
                 Mouse::LeftClick => {
                     if idx >= len {
@@ -603,7 +610,14 @@ impl App {
                         }
                         _ => {
                             self.focus = Focus::Diff;
-                            let row = self.diff_scroll + (y - regions.right.y - 1) as usize;
+                            let viewport = if self.diff_viewport > 0 {
+                                self.diff_viewport
+                            } else {
+                                regions.right.height.saturating_sub(2) as usize
+                            };
+                            // the same clamped top the renderer uses
+                            let top = self.diff_scroll.min(len.saturating_sub(viewport.max(1)));
+                            let row = top + (y - regions.right.y - 1) as usize;
                             self.cursor = row.min(len - 1);
                         }
                     }
@@ -1086,10 +1100,25 @@ index 1111111..2222222 100644
         // click below the last row clamps to last
         a.handle_mouse(Mouse::LeftClick, 30, 12, &regions());
         assert_eq!(a.cursor, a.rows().len() - 1);
-        // click maps through the scroll offset
+        // click maps through the scroll offset (small viewport → scroll is real)
+        a.diff_viewport = 2;
         a.diff_scroll = 1;
         a.handle_mouse(Mouse::LeftClick, 30, 2, &regions());
         assert_eq!(a.cursor, 2);
+    }
+
+    #[test]
+    fn click_uses_the_same_clamped_top_as_rendering() {
+        let mut a = app(); // 4 diff rows
+        a.diff_viewport = 14; // tall pane: whole file fits, draw clamps top to 0
+        a.diff_scroll = 10; // stale jump-to-first-change offset
+        a.handle_mouse(Mouse::LeftClick, 30, 3, &regions()); // visual row 2
+        assert_eq!(a.cursor, 2, "clicked row, not 10 rows below");
+        // same for the files pane
+        a.files_viewport = 10;
+        a.files_scroll = 5; // stale, but the 2-row tree fits entirely
+        a.handle_mouse(Mouse::LeftClick, 3, 8, &regions()); // visual row 1
+        assert_eq!(a.selected_file, 1);
     }
 
     #[test]
@@ -1346,6 +1375,7 @@ index 1111111..2222222 100644
     #[test]
     fn files_click_maps_through_scroll_offset() {
         let mut a = tree_app();
+        a.files_viewport = 3;
         a.files_scroll = 2; // visible rows start at "main.rs"
         // y=7 is the first visible row → tree row 2 = src/main.rs
         match a.handle_mouse(Mouse::LeftClick, 3, 7, &regions()) {
