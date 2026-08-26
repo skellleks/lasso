@@ -197,7 +197,7 @@ fn draw_agents(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn file_badge(app: &App, path: &str) -> Span<'static> {
-    match app.files.iter().find(|f| f.new_path == path).map(|f| &f.status) {
+    match app.file_index_by_display(path).and_then(|i| app.files.get(i)).map(|f| &f.status) {
         Some(crate::diff::FileStatus::Added) => Span::styled("A", Style::default().fg(Color::Green)),
         Some(crate::diff::FileStatus::Deleted) => Span::styled("D", Style::default().fg(Color::Red)),
         Some(crate::diff::FileStatus::Renamed) => Span::styled("R", Style::default().fg(Color::Magenta)),
@@ -254,7 +254,7 @@ fn draw_diff(f: &mut Frame, app: &App, area: Rect) {
     let title = app
         .files
         .get(app.diff_file)
-        .map(|fd| format!("diff: {}", fd.new_path))
+        .map(|_| format!("diff: {}", app.current_diff_path().unwrap_or_default()))
         .unwrap_or_else(|| "diff".to_string());
     let block = Block::default()
         .title(title)
@@ -272,7 +272,7 @@ fn draw_diff(f: &mut Frame, app: &App, area: Rect) {
     let emphasis = emphasis_for(&rows);
     let height = area.height.saturating_sub(2) as usize;
     let top = app.diff_scroll.min(rows.len().saturating_sub(height.max(1)));
-    let path = app.files.get(app.diff_file).map(|f| f.new_path.clone()).unwrap_or_default();
+    let path = app.current_diff_path().unwrap_or_default();
     let width = area.width.saturating_sub(2) as usize;
     let mut lines: Vec<Line> = Vec::new();
     for (i, row) in rows.iter().enumerate().skip(top).take(height.max(1)) {
@@ -339,7 +339,7 @@ fn draw_diff(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn commented_lines(app: &App) -> Vec<(Side, u32)> {
-    let path = app.files.get(app.diff_file).map(|f| f.new_path.as_str()).unwrap_or("");
+    let path = app.comment_path().unwrap_or_default();
     app.store
         .comments(&app.agent_key())
         .iter()

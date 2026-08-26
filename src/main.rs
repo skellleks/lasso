@@ -4,6 +4,7 @@ mod gitio;
 mod herdr;
 mod highlight;
 mod review;
+mod transcript;
 mod tree;
 mod ui;
 
@@ -183,9 +184,14 @@ fn run_tui() -> Result<()> {
             }
             // keep the full content of the current diff file loaded so the
             // diff renders with the whole file as context
-            if let Some(path) = app.current_diff_path().map(str::to_string) {
-                let lines = read_repo_lines(&app, &path, standalone);
-                app.set_diff_content(&path, lines);
+            if let Some(display) = app.current_diff_path() {
+                let (root, rel) = match app.current_file_location() {
+                    Some((Some(root), rel)) => (root.to_path_buf(), rel.to_string()),
+                    Some((None, rel)) => (repo_root_for(&app, standalone), rel.to_string()),
+                    None => (repo_root_for(&app, standalone), display.clone()),
+                };
+                let lines = read_lines(&root.join(&rel));
+                app.set_diff_content(&display, lines);
             }
             terminal.draw(|f| ui::draw(f, &app, &file_view))?;
             let ev = rx.recv()?;
@@ -294,10 +300,29 @@ fn refresh(app: &mut App, base: DiffBase, standalone: bool) {
     let Some(cwd) = cwd else { return };
     match gitio::repo_root(&cwd) {
         Some(root) => {
-            match gitio::full_diff(&root, base) {
-                Ok(files) => app.set_diff(files),
-                Err(e) => app.status = format!("git: {e}"),
+            let cwd_canon = root.canonicalize().unwrap_or_else(|_| root.clone());
+            let mut roots = vec![root.clone()];
+            // repos the agent touched in this session, per its transcript
+            for extra in transcript_repo_roots(app) {
+                if extra.canonicalize().map(|c| c != cwd_canon).unwrap_or(true)
+                    && !roots.contains(&extra)
+                {
+                    roots.push(extra);
+                }
             }
+            let mut groups: Vec<(app::RepoRef, Vec<crate::diff::FileDiff>)> = Vec::new();
+            for (i, r) in roots.iter().enumerate() {
+                match gitio::full_diff(r, base) {
+                    Ok(files) => {
+                        // extra repos with no pending changes add only noise
+                        if i == 0 || !files.is_empty() {
+                            groups.push((repo_ref(r, &groups), files));
+                        }
+                    }
+                    Err(e) => app.status = format!("git: {e}"),
+                }
+            }
+            app.set_multi_diff(groups);
             if app.all_files_mode {
                 app.all_files = gitio::ls_files(&root).unwrap_or_default();
                 app.selected_file = app.selected_file.min(app.tree_rows().len().saturating_sub(1));
@@ -308,6 +333,60 @@ fn refresh(app: &mut App, base: DiffBase, standalone: bool) {
             app.status = format!("not a git repo: {}", cwd.display());
         }
     }
+}
+
+/// Label a repo by its dir name, disambiguating duplicates with the parent dir.
+fn repo_ref(root: &std::path::Path, taken: &[(app::RepoRef, Vec<crate::diff::FileDiff>)]) -> app::RepoRef {
+    let base = root.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let label = if taken.iter().any(|(r, _)| r.label == base) {
+        let parent = root
+            .parent()
+            .and_then(|p| p.file_name())
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        format!("{parent}-{base}")
+    } else {
+        base
+    };
+    app::RepoRef { root: root.to_path_buf(), label }
+}
+
+/// Git roots of the files this window's agent edited, from its Claude Code
+/// transcript. Cached by (path, mtime) — transcripts get large.
+fn transcript_repo_roots(app: &App) -> Vec<PathBuf> {
+    use std::sync::{Mutex, OnceLock};
+    type Cache = std::collections::HashMap<PathBuf, (std::time::SystemTime, Vec<PathBuf>)>;
+    static CACHE: OnceLock<Mutex<Cache>> = OnceLock::new();
+
+    let Some(agent) = app.agent() else { return Vec::new() };
+    if agent.agent != "claude" {
+        return Vec::new();
+    }
+    let Some(session) = agent.agent_session.as_ref().filter(|s| s.kind == "id") else {
+        return Vec::new();
+    };
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else { return Vec::new() };
+    let path = transcript::transcript_path(&home, &agent.cwd, &session.value);
+    let Ok(mtime) = std::fs::metadata(&path).and_then(|m| m.modified()) else {
+        return Vec::new();
+    };
+    let cache = CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
+    if let Ok(guard) = cache.lock() {
+        if let Some((t, roots)) = guard.get(&path) {
+            if *t == mtime {
+                return roots.clone();
+            }
+        }
+    }
+    let roots: Vec<PathBuf> = std::fs::read_to_string(&path)
+        .map(|jsonl| {
+            gitio::group_by_repo(&transcript::edited_files(&jsonl)).into_keys().collect()
+        })
+        .unwrap_or_default();
+    if let Ok(mut guard) = cache.lock() {
+        guard.insert(path, (mtime, roots.clone()));
+    }
+    roots
 }
 
 /// Repo root the current agent's files live in.
@@ -321,8 +400,8 @@ fn repo_root_for(app: &App, standalone: bool) -> PathBuf {
 }
 
 /// Lines of a repo file; empty when unreadable (deleted/binary files).
-fn read_repo_lines(app: &App, path: &str, standalone: bool) -> Vec<String> {
-    let full = repo_root_for(app, standalone).join(path);
+/// Lines of a file; empty when unreadable (deleted/binary files).
+fn read_lines(full: &std::path::Path) -> Vec<String> {
     match std::fs::read_to_string(full) {
         Ok(content) => content.lines().map(str::to_string).collect(),
         Err(_) => Vec::new(),
@@ -330,9 +409,22 @@ fn read_repo_lines(app: &App, path: &str, standalone: bool) -> Vec<String> {
 }
 
 fn load_file_view(app: &App, path: &str, standalone: bool) -> FileView {
-    let root = repo_root_for(app, standalone);
-    let content = std::fs::read_to_string(root.join(path)).unwrap_or_else(|e| format!("<{e}>"));
-    let file_diff = app.files.iter().find(|f| f.new_path == path);
+    let file_idx = app.file_index_by_display(path);
+    let (root, rel) = match file_idx {
+        Some(i) => {
+            let rel = app.files[i].new_path.clone();
+            let root = app
+                .file_repo
+                .get(i)
+                .and_then(|&r| app.repos.get(r))
+                .map(|r| r.root.clone())
+                .unwrap_or_else(|| repo_root_for(app, standalone));
+            (root, rel)
+        }
+        None => (repo_root_for(app, standalone), path.to_string()),
+    };
+    let content = std::fs::read_to_string(root.join(&rel)).unwrap_or_else(|e| format!("<{e}>"));
+    let file_diff = file_idx.and_then(|i| app.files.get(i));
     let changed: BTreeSet<u32> = file_diff
         .map(|f| {
             f.hunks

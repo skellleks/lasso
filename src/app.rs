@@ -69,12 +69,23 @@ pub enum Mouse {
     WheelRight,
 }
 
+/// One git repo a window shows changes from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepoRef {
+    pub root: std::path::PathBuf,
+    pub label: String,
+}
+
 pub struct App {
     /// The one agent this window is pinned to; it never switches.
     pub agent: Option<Agent>,
     /// Pane id this window was pinned to at startup.
     pub pinned_pane: Option<String>,
     pub files: Vec<FileDiff>,
+    /// Repos the files belong to; empty in plain single-repo mode.
+    pub repos: Vec<RepoRef>,
+    /// Repo index (into `repos`) per entry of `files`.
+    pub file_repo: Vec<usize>,
     /// Row of the Files tree the selection is on.
     pub selected_file: usize,
     /// Index into `files` whose diff the right pane shows.
@@ -116,6 +127,8 @@ impl App {
             agent: None,
             pinned_pane: None,
             files: Vec::new(),
+            repos: Vec::new(),
+            file_repo: Vec::new(),
             selected_file: 0,
             diff_file: 0,
             all_files_mode: false,
@@ -167,6 +180,67 @@ impl App {
         }
     }
 
+    /// Path of a file as shown in the Files tree: repo-label-prefixed when
+    /// this window spans several repos.
+    pub fn display_path(&self, idx: usize) -> Option<String> {
+        let f = self.files.get(idx)?;
+        if self.repos.len() > 1 {
+            let repo = self.repos.get(*self.file_repo.get(idx)?)?;
+            Some(format!("{}/{}", repo.label, f.new_path))
+        } else {
+            Some(f.new_path.clone())
+        }
+    }
+
+    /// Index of the file whose display path matches.
+    pub fn file_index_by_display(&self, display: &str) -> Option<usize> {
+        (0..self.files.len()).find(|&i| self.display_path(i).as_deref() == Some(display))
+    }
+
+    /// Where the current diff file lives: (repo root if known, repo-relative path).
+    pub fn current_file_location(&self) -> Option<(Option<&std::path::Path>, &str)> {
+        let f = self.files.get(self.diff_file)?;
+        let root = self
+            .file_repo
+            .get(self.diff_file)
+            .and_then(|&r| self.repos.get(r))
+            .map(|r| r.root.as_path());
+        Some((root, f.new_path.as_str()))
+    }
+
+    /// Replace the diff with per-repo groups (the cwd repo plus any repos the
+    /// agent touched), keeping the shown file and tree selection when possible.
+    pub fn set_multi_diff(&mut self, groups: Vec<(RepoRef, Vec<FileDiff>)>) {
+        let prev_diff = self.display_path(self.diff_file);
+        let prev_sel = if self.all_files_mode {
+            None
+        } else {
+            self.files_tree_rows().get(self.selected_file).map(|r| r.path.clone())
+        };
+        self.files.clear();
+        self.repos.clear();
+        self.file_repo.clear();
+        for (i, (repo, files)) in groups.into_iter().enumerate() {
+            self.repos.push(repo);
+            for f in files {
+                self.files.push(f);
+                self.file_repo.push(i);
+            }
+        }
+        self.diff_file = prev_diff
+            .and_then(|p| self.file_index_by_display(&p))
+            .unwrap_or(0);
+        if let Some(p) = prev_sel {
+            self.selected_file = self
+                .files_tree_rows()
+                .iter()
+                .position(|r| r.path == p)
+                .unwrap_or(0);
+        }
+        self.cursor = self.cursor.min(self.rows().len().saturating_sub(1));
+        self.diff_scroll = self.diff_scroll.min(self.rows().len().saturating_sub(1));
+    }
+
     /// Replace the diff, keeping the shown diff file and the tree selection
     /// on the same paths when possible.
     pub fn set_diff(&mut self, files: Vec<FileDiff>) {
@@ -177,6 +251,8 @@ impl App {
             self.files_tree_rows().get(self.selected_file).map(|r| r.path.clone())
         };
         self.files = files;
+        self.repos.clear();
+        self.file_repo.clear();
         self.diff_file = diff_path
             .and_then(|p| self.files.iter().position(|f| f.new_path == p))
             .unwrap_or(0);
@@ -191,9 +267,9 @@ impl App {
         self.diff_scroll = self.diff_scroll.min(self.rows().len().saturating_sub(1));
     }
 
-    /// Path of the diff file the right pane currently shows.
-    pub fn current_diff_path(&self) -> Option<&str> {
-        self.files.get(self.diff_file).map(|f| f.new_path.as_str())
+    /// Display path of the diff file the right pane currently shows.
+    pub fn current_diff_path(&self) -> Option<String> {
+        self.display_path(self.diff_file)
     }
 
     /// Provide the full content of the current diff file. On a new file this
@@ -227,7 +303,7 @@ impl App {
             return Vec::new();
         };
         if !self.file_lines.is_empty()
-            && self.content_path.as_deref() == Some(file.new_path.as_str())
+            && self.content_path == self.display_path(self.diff_file)
             && self.content_agent == self.agent_key()
         {
             let added: std::collections::BTreeSet<u32> = file
@@ -277,7 +353,8 @@ impl App {
         if self.all_files_mode {
             self.tree_rows()
         } else {
-            let paths: Vec<String> = self.files.iter().map(|f| f.new_path.clone()).collect();
+            let paths: Vec<String> =
+                (0..self.files.len()).filter_map(|i| self.display_path(i)).collect();
             crate::tree::visible_rows(&paths, &self.collapsed)
         }
     }
@@ -309,7 +386,7 @@ impl App {
         if self.all_files_mode {
             return self.activate_tree_row(idx);
         }
-        if let Some(i) = self.files.iter().position(|f| f.new_path == row.path) {
+        if let Some(i) = self.file_index_by_display(&row.path) {
             self.diff_file = i;
             self.right = RightPane::Diff;
             self.cursor = 0;
@@ -333,7 +410,7 @@ impl App {
         }
         if let Some(row) = self.files_tree_rows().get(self.selected_file) {
             if !row.is_dir {
-                if let Some(i) = self.files.iter().position(|f| f.new_path == row.path) {
+                if let Some(i) = self.file_index_by_display(&row.path) {
                     if i != self.diff_file {
                         self.diff_file = i;
                         self.cursor = 0;
@@ -344,13 +421,22 @@ impl App {
         }
     }
 
+    /// Path used in comments for the current diff file: absolute when the
+    /// repo root is known, repo-relative otherwise.
+    pub fn comment_path(&self) -> Option<String> {
+        match self.current_file_location()? {
+            (Some(root), rel) => Some(root.join(rel).to_string_lossy().into_owned()),
+            (None, rel) => Some(rel.to_string()),
+        }
+    }
+
     /// Comment anchor for the current cursor row, if it is a diff line.
     pub fn anchor_at_cursor(&self) -> Option<(String, Side, u32, Vec<String>)> {
         let rows = self.rows();
         let Row::Line(line) = rows.get(self.cursor)? else {
             return None;
         };
-        let path = self.files.get(self.diff_file)?.new_path.clone();
+        let path = self.comment_path()?;
         let (side, no) = match line.kind {
             LineKind::Del => (Side::Old, line.old_no?),
             _ => (Side::New, line.new_no?),
@@ -1194,6 +1280,91 @@ index 1111111..2222222 100644
         a.set_diff(reordered);
         assert!(matches!(&a.rows()[1], Row::Line(l) if l.text == "a"),
             "diff file preserved across refresh");
+    }
+
+    fn multi_app() -> App {
+        let mut a = app();
+        a.set_multi_diff(vec![
+            (
+                RepoRef { root: "/repo/api".into(), label: "api".into() },
+                parse(DIFF), // user.py, config.py
+            ),
+            (
+                RepoRef { root: "/repo/web".into(), label: "web".into() },
+                parse(NESTED_DIFF), // src/app.rs, README.md
+            ),
+        ]);
+        a
+    }
+
+    #[test]
+    fn multi_repo_tree_gets_repo_roots_as_top_dirs() {
+        let a = multi_app();
+        let rows = a.files_tree_rows();
+        let names: Vec<(usize, &str, bool)> =
+            rows.iter().map(|r| (r.depth, r.name.as_str(), r.is_dir)).collect();
+        assert_eq!(
+            names,
+            vec![
+                (0, "api", true),
+                (1, "config.py", false),
+                (1, "user.py", false),
+                (0, "web", true),
+                (1, "src", true),
+                (2, "app.rs", false),
+                (1, "README.md", false),
+            ]
+        );
+    }
+
+    #[test]
+    fn single_repo_group_keeps_plain_tree() {
+        let mut a = app();
+        a.set_multi_diff(vec![(
+            RepoRef { root: "/repo/api".into(), label: "api".into() },
+            parse(DIFF),
+        )]);
+        let rows = a.files_tree_rows();
+        assert_eq!(rows[0].name, "config.py", "no repo prefix for a single repo");
+        // but the root is still known for file reads
+        let (root, rel) = a.current_file_location().unwrap();
+        assert_eq!(root.unwrap(), std::path::Path::new("/repo/api"));
+        assert_eq!(rel, "user.py");
+    }
+
+    #[test]
+    fn multi_repo_click_shows_diff_of_other_repo_file() {
+        let mut a = multi_app();
+        // rows: api(y7), config.py(y8), user.py(y9), web(y10), src(y11), app.rs(y12), README.md(y13)
+        a.handle_mouse(Mouse::LeftClick, 3, 12, &regions()); // web/src/app.rs
+        assert!(matches!(&a.rows()[1], Row::Line(l) if l.text == "old"), "web repo diff shown");
+        let (root, rel) = a.current_file_location().unwrap();
+        assert_eq!(root.unwrap(), std::path::Path::new("/repo/web"));
+        assert_eq!(rel, "src/app.rs");
+    }
+
+    #[test]
+    fn multi_repo_comment_anchor_uses_absolute_path() {
+        let mut a = multi_app();
+        a.focus = Focus::Diff;
+        a.cursor = 3; // "+    return user" of api/user.py (hunk fallback rows)
+        let (path, _, line, _) = a.anchor_at_cursor().unwrap();
+        assert_eq!(path, "/repo/api/user.py");
+        assert_eq!(line, 42);
+    }
+
+    #[test]
+    fn multi_repo_refresh_preserves_current_file_by_display_path() {
+        let mut a = multi_app();
+        a.handle_mouse(Mouse::LeftClick, 3, 12, &regions()); // web/src/app.rs
+        // same groups reversed
+        a.set_multi_diff(vec![
+            (RepoRef { root: "/repo/web".into(), label: "web".into() }, parse(NESTED_DIFF)),
+            (RepoRef { root: "/repo/api".into(), label: "api".into() }, parse(DIFF)),
+        ]);
+        let (root, rel) = a.current_file_location().unwrap();
+        assert_eq!(root.unwrap(), std::path::Path::new("/repo/web"));
+        assert_eq!(rel, "src/app.rs");
     }
 
     #[test]
