@@ -256,7 +256,9 @@ fn apply_action(
             refresh(app, *base, standalone);
         }
         Action::OpenFile { path } => {
-            *file_view = load_file_view(app, &path, standalone);
+            let (fv, model) = load_file_view(app, &path, standalone);
+            *file_view = fv;
+            app.set_view(&path, model);
         }
         Action::Submit { pane_id, text } => match herdr::agent_prompt(&pane_id, &text) {
             Ok(()) => {
@@ -427,7 +429,7 @@ fn read_lines(full: &std::path::Path) -> Vec<String> {
     }
 }
 
-fn load_file_view(app: &App, path: &str, standalone: bool) -> FileView {
+fn load_file_view(app: &App, path: &str, standalone: bool) -> (FileView, Vec<(Option<u32>, String)>) {
     let file_idx = app.file_index_by_display(path);
     let (root, rel) = match file_idx {
         Some(i) => {
@@ -457,19 +459,28 @@ fn load_file_view(app: &App, path: &str, standalone: bool) -> FileView {
     let deletions = file_diff.map(diff::deletions_by_anchor).unwrap_or_default();
 
     let mut lines = Vec::new();
+    let mut model: Vec<(Option<u32>, String)> = Vec::new();
+    let plain: Vec<String> = content.lines().map(str::to_string).collect();
     for (i, (line, is_changed)) in highlight::highlight_file(path, &content, &changed).into_iter().enumerate() {
         let no = i as u32 + 1;
         if let Some(dels) = deletions.get(&no) {
-            lines.extend(dels.iter().map(|t| ui::FvLine::Deleted { text: t.clone() }));
+            for t in dels {
+                lines.push(ui::FvLine::Deleted { text: t.clone() });
+                model.push((None, t.clone()));
+            }
         }
         lines.push(ui::FvLine::Content { line, changed: is_changed });
+        model.push((Some(no), plain.get(i).cloned().unwrap_or_default()));
     }
     // deletions anchored past the last content line (EOF deletions)
     let n = lines.iter().filter(|l| matches!(l, ui::FvLine::Content { .. })).count() as u32;
     for (_, dels) in deletions.range(n + 1..) {
-        lines.extend(dels.iter().map(|t| ui::FvLine::Deleted { text: t.clone() }));
+        for t in dels {
+            lines.push(ui::FvLine::Deleted { text: t.clone() });
+            model.push((None, t.clone()));
+        }
     }
-    FileView { path: path.to_string(), lines }
+    (FileView { path: path.to_string(), lines }, model)
 }
 
 fn spawn_socket_listener(tx: mpsc::Sender<AppEvent>) {
