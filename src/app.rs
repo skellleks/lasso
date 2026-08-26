@@ -69,12 +69,23 @@ pub enum Mouse {
     WheelRight,
 }
 
+/// One git repo a window shows changes from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepoRef {
+    pub root: std::path::PathBuf,
+    pub label: String,
+}
+
 pub struct App {
     /// The one agent this window is pinned to; it never switches.
     pub agent: Option<Agent>,
     /// Pane id this window was pinned to at startup.
     pub pinned_pane: Option<String>,
     pub files: Vec<FileDiff>,
+    /// Repos the files belong to; empty in plain single-repo mode.
+    pub repos: Vec<RepoRef>,
+    /// Repo index (into `repos`) per entry of `files`.
+    pub file_repo: Vec<usize>,
     /// Row of the Files tree the selection is on.
     pub selected_file: usize,
     /// Index into `files` whose diff the right pane shows.
@@ -96,6 +107,12 @@ pub struct App {
     pub hscroll: u16,
     /// Vertical scroll of the file viewer.
     pub fv_scroll: u16,
+    /// Cursor row of the file viewer.
+    pub fv_cursor: usize,
+    /// Display path of the file open in the viewer.
+    pub viewing: Option<String>,
+    /// Viewer rows: (content line number, text); None = inline deleted row.
+    pub view_model: Vec<(Option<u32>, String)>,
     /// Content (new side) of the current diff file; empty → hunk-only view.
     pub file_lines: Vec<String>,
     /// Path `file_lines` belongs to.
@@ -116,6 +133,8 @@ impl App {
             agent: None,
             pinned_pane: None,
             files: Vec::new(),
+            repos: Vec::new(),
+            file_repo: Vec::new(),
             selected_file: 0,
             diff_file: 0,
             all_files_mode: false,
@@ -133,6 +152,9 @@ impl App {
             standalone,
             hscroll: 0,
             fv_scroll: 0,
+            fv_cursor: 0,
+            viewing: None,
+            view_model: Vec::new(),
             file_lines: Vec::new(),
             content_path: None,
             content_agent: String::new(),
@@ -167,6 +189,67 @@ impl App {
         }
     }
 
+    /// Path of a file as shown in the Files tree: repo-label-prefixed when
+    /// this window spans several repos.
+    pub fn display_path(&self, idx: usize) -> Option<String> {
+        let f = self.files.get(idx)?;
+        if self.repos.len() > 1 {
+            let repo = self.repos.get(*self.file_repo.get(idx)?)?;
+            Some(format!("{}/{}", repo.label, f.new_path))
+        } else {
+            Some(f.new_path.clone())
+        }
+    }
+
+    /// Index of the file whose display path matches.
+    pub fn file_index_by_display(&self, display: &str) -> Option<usize> {
+        (0..self.files.len()).find(|&i| self.display_path(i).as_deref() == Some(display))
+    }
+
+    /// Where the current diff file lives: (repo root if known, repo-relative path).
+    pub fn current_file_location(&self) -> Option<(Option<&std::path::Path>, &str)> {
+        let f = self.files.get(self.diff_file)?;
+        let root = self
+            .file_repo
+            .get(self.diff_file)
+            .and_then(|&r| self.repos.get(r))
+            .map(|r| r.root.as_path());
+        Some((root, f.new_path.as_str()))
+    }
+
+    /// Replace the diff with per-repo groups (the cwd repo plus any repos the
+    /// agent touched), keeping the shown file and tree selection when possible.
+    pub fn set_multi_diff(&mut self, groups: Vec<(RepoRef, Vec<FileDiff>)>) {
+        let prev_diff = self.display_path(self.diff_file);
+        let prev_sel = if self.all_files_mode {
+            None
+        } else {
+            self.files_tree_rows().get(self.selected_file).map(|r| r.path.clone())
+        };
+        self.files.clear();
+        self.repos.clear();
+        self.file_repo.clear();
+        for (i, (repo, files)) in groups.into_iter().enumerate() {
+            self.repos.push(repo);
+            for f in files {
+                self.files.push(f);
+                self.file_repo.push(i);
+            }
+        }
+        self.diff_file = prev_diff
+            .and_then(|p| self.file_index_by_display(&p))
+            .unwrap_or(0);
+        if let Some(p) = prev_sel {
+            self.selected_file = self
+                .files_tree_rows()
+                .iter()
+                .position(|r| r.path == p)
+                .unwrap_or(0);
+        }
+        self.cursor = self.cursor.min(self.rows().len().saturating_sub(1));
+        self.diff_scroll = self.diff_scroll.min(self.rows().len().saturating_sub(1));
+    }
+
     /// Replace the diff, keeping the shown diff file and the tree selection
     /// on the same paths when possible.
     pub fn set_diff(&mut self, files: Vec<FileDiff>) {
@@ -177,6 +260,8 @@ impl App {
             self.files_tree_rows().get(self.selected_file).map(|r| r.path.clone())
         };
         self.files = files;
+        self.repos.clear();
+        self.file_repo.clear();
         self.diff_file = diff_path
             .and_then(|p| self.files.iter().position(|f| f.new_path == p))
             .unwrap_or(0);
@@ -191,9 +276,9 @@ impl App {
         self.diff_scroll = self.diff_scroll.min(self.rows().len().saturating_sub(1));
     }
 
-    /// Path of the diff file the right pane currently shows.
-    pub fn current_diff_path(&self) -> Option<&str> {
-        self.files.get(self.diff_file).map(|f| f.new_path.as_str())
+    /// Display path of the diff file the right pane currently shows.
+    pub fn current_diff_path(&self) -> Option<String> {
+        self.display_path(self.diff_file)
     }
 
     /// Provide the full content of the current diff file. On a new file this
@@ -227,7 +312,7 @@ impl App {
             return Vec::new();
         };
         if !self.file_lines.is_empty()
-            && self.content_path.as_deref() == Some(file.new_path.as_str())
+            && self.content_path == self.display_path(self.diff_file)
             && self.content_agent == self.agent_key()
         {
             let added: std::collections::BTreeSet<u32> = file
@@ -277,7 +362,8 @@ impl App {
         if self.all_files_mode {
             self.tree_rows()
         } else {
-            let paths: Vec<String> = self.files.iter().map(|f| f.new_path.clone()).collect();
+            let paths: Vec<String> =
+                (0..self.files.len()).filter_map(|i| self.display_path(i)).collect();
             crate::tree::visible_rows(&paths, &self.collapsed)
         }
     }
@@ -291,7 +377,9 @@ impl App {
             Action::None
         } else {
             self.right = RightPane::File;
+            self.focus = Focus::Diff; // move into the opened file
             self.fv_scroll = 0;
+            self.fv_cursor = 0;
             self.hscroll = 0;
             Action::OpenFile { path: row.path.clone() }
         }
@@ -309,7 +397,7 @@ impl App {
         if self.all_files_mode {
             return self.activate_tree_row(idx);
         }
-        if let Some(i) = self.files.iter().position(|f| f.new_path == row.path) {
+        if let Some(i) = self.file_index_by_display(&row.path) {
             self.diff_file = i;
             self.right = RightPane::Diff;
             self.cursor = 0;
@@ -333,7 +421,7 @@ impl App {
         }
         if let Some(row) = self.files_tree_rows().get(self.selected_file) {
             if !row.is_dir {
-                if let Some(i) = self.files.iter().position(|f| f.new_path == row.path) {
+                if let Some(i) = self.file_index_by_display(&row.path) {
                     if i != self.diff_file {
                         self.diff_file = i;
                         self.cursor = 0;
@@ -344,13 +432,77 @@ impl App {
         }
     }
 
+    /// Provide the viewer's rows for the file it shows.
+    pub fn set_view(&mut self, display: &str, model: Vec<(Option<u32>, String)>) {
+        self.viewing = Some(display.to_string());
+        self.view_model = model;
+        self.fv_cursor = self.fv_cursor.min(self.view_model.len().saturating_sub(1));
+    }
+
+    /// Resolve a Files-tree display path to what a comment should carry:
+    /// absolute when the repo root is known, as-is otherwise.
+    pub fn path_for_display(&self, display: &str) -> String {
+        if let Some(i) = self.file_index_by_display(display) {
+            if let Some(root) = self.file_repo.get(i).and_then(|&r| self.repos.get(r)) {
+                return root.root.join(&self.files[i].new_path).to_string_lossy().into_owned();
+            }
+            return self.files[i].new_path.clone();
+        }
+        for r in &self.repos {
+            if let Some(rest) = display.strip_prefix(&format!("{}/", r.label)) {
+                return r.root.join(rest).to_string_lossy().into_owned();
+            }
+        }
+        if let Some(r) = self.repos.first() {
+            return r.root.join(display).to_string_lossy().into_owned();
+        }
+        display.to_string()
+    }
+
+    /// Comment path for the file open in the viewer.
+    pub fn view_comment_path(&self) -> Option<String> {
+        self.viewing.as_deref().map(|d| self.path_for_display(d))
+    }
+
+    /// Comment anchor for the viewer cursor; None on deleted rows.
+    fn anchor_at_view_cursor(&self) -> Option<(String, Side, u32, Vec<String>)> {
+        let (no, _) = self.view_model.get(self.fv_cursor)?;
+        let no = (*no)?;
+        let path = self.view_comment_path()?;
+        let from = self.fv_cursor.saturating_sub(2);
+        let to = (self.fv_cursor + 3).min(self.view_model.len());
+        let quote = self.view_model[from..to]
+            .iter()
+            .map(|(n, text)| format!("{}{}", if n.is_some() { " " } else { "-" }, text))
+            .collect();
+        Some((path, Side::New, no, quote))
+    }
+
+    /// Anchor for a new comment wherever the user currently is.
+    fn current_anchor(&self) -> Option<(String, Side, u32, Vec<String>)> {
+        if self.right == RightPane::File {
+            self.anchor_at_view_cursor()
+        } else {
+            self.anchor_at_cursor()
+        }
+    }
+
+    /// Path used in comments for the current diff file: absolute when the
+    /// repo root is known, repo-relative otherwise.
+    pub fn comment_path(&self) -> Option<String> {
+        match self.current_file_location()? {
+            (Some(root), rel) => Some(root.join(rel).to_string_lossy().into_owned()),
+            (None, rel) => Some(rel.to_string()),
+        }
+    }
+
     /// Comment anchor for the current cursor row, if it is a diff line.
     pub fn anchor_at_cursor(&self) -> Option<(String, Side, u32, Vec<String>)> {
         let rows = self.rows();
         let Row::Line(line) = rows.get(self.cursor)? else {
             return None;
         };
-        let path = self.files.get(self.diff_file)?.new_path.clone();
+        let path = self.comment_path()?;
         let (side, no) = match line.kind {
             LineKind::Del => (Side::Old, line.old_no?),
             _ => (Side::New, line.new_no?),
@@ -379,8 +531,15 @@ impl App {
             // pinned-agent header: not interactive
             Action::None
         } else if inside(&regions.files) {
-            let idx = self.files_scroll + (y - regions.files.y - 1) as usize;
             let len = self.files_tree_rows().len();
+            let files_viewport = if self.files_viewport > 0 {
+                self.files_viewport
+            } else {
+                regions.files.height.saturating_sub(2) as usize
+            };
+            // the same clamped top the renderer uses
+            let top = self.files_scroll.min(len.saturating_sub(files_viewport.max(1)));
+            let idx = top + (y - regions.files.y - 1) as usize;
             match m {
                 Mouse::LeftClick => {
                     if idx >= len {
@@ -420,7 +579,13 @@ impl App {
                     match m {
                         Mouse::WheelDown => self.fv_scroll = self.fv_scroll.saturating_add(3),
                         Mouse::WheelUp => self.fv_scroll = self.fv_scroll.saturating_sub(3),
-                        _ => self.focus = Focus::Diff,
+                        _ => {
+                            self.focus = Focus::Diff;
+                            if !self.view_model.is_empty() {
+                                let row = self.fv_scroll as usize + (y - regions.right.y - 1) as usize;
+                                self.fv_cursor = row.min(self.view_model.len() - 1);
+                            }
+                        }
                     }
                     Action::None
                 }
@@ -445,7 +610,14 @@ impl App {
                         }
                         _ => {
                             self.focus = Focus::Diff;
-                            let row = self.diff_scroll + (y - regions.right.y - 1) as usize;
+                            let viewport = if self.diff_viewport > 0 {
+                                self.diff_viewport
+                            } else {
+                                regions.right.height.saturating_sub(2) as usize
+                            };
+                            // the same clamped top the renderer uses
+                            let top = self.diff_scroll.min(len.saturating_sub(viewport.max(1)));
+                            let row = top + (y - regions.right.y - 1) as usize;
                             self.cursor = row.min(len - 1);
                         }
                     }
@@ -479,11 +651,20 @@ impl App {
                 Action::None
             }
             'j' | 'k' if self.right == RightPane::File && self.focus != Focus::Files => {
-                self.fv_scroll = if key == 'j' {
-                    self.fv_scroll.saturating_add(1)
+                let len = self.view_model.len();
+                self.fv_cursor = if key == 'j' {
+                    (self.fv_cursor + 1).min(len.saturating_sub(1))
                 } else {
-                    self.fv_scroll.saturating_sub(1)
+                    self.fv_cursor.saturating_sub(1)
                 };
+                // keep the cursor visible
+                if self.diff_viewport > 0 {
+                    if self.fv_cursor < self.fv_scroll as usize {
+                        self.fv_scroll = self.fv_cursor as u16;
+                    } else if self.fv_cursor >= self.fv_scroll as usize + self.diff_viewport {
+                        self.fv_scroll = (self.fv_cursor + 1 - self.diff_viewport) as u16;
+                    }
+                }
                 Action::None
             }
             'j' | 'k' => {
@@ -503,8 +684,8 @@ impl App {
                 Action::None
             }
             '\n' if self.focus == Focus::Files => self.activate_tree_row(self.selected_file),
-            'c' if self.focus == Focus::Diff && !self.standalone => {
-                if self.anchor_at_cursor().is_some() {
+            'c' if !self.standalone && (self.focus == Focus::Diff || self.right == RightPane::File) => {
+                if self.current_anchor().is_some() {
                     self.modal = Some(Modal::Input { buffer: String::new() });
                 }
                 Action::None
@@ -527,7 +708,7 @@ impl App {
             Modal::Input { mut buffer } => match key {
                 '\n' => {
                     if !buffer.trim().is_empty() {
-                        if let Some((path, side, line_no, quote)) = self.anchor_at_cursor() {
+                        if let Some((path, side, line_no, quote)) = self.current_anchor() {
                             let agent_key = self.agent_key();
                             self.store.add(
                                 &agent_key,
@@ -919,10 +1100,25 @@ index 1111111..2222222 100644
         // click below the last row clamps to last
         a.handle_mouse(Mouse::LeftClick, 30, 12, &regions());
         assert_eq!(a.cursor, a.rows().len() - 1);
-        // click maps through the scroll offset
+        // click maps through the scroll offset (small viewport → scroll is real)
+        a.diff_viewport = 2;
         a.diff_scroll = 1;
         a.handle_mouse(Mouse::LeftClick, 30, 2, &regions());
         assert_eq!(a.cursor, 2);
+    }
+
+    #[test]
+    fn click_uses_the_same_clamped_top_as_rendering() {
+        let mut a = app(); // 4 diff rows
+        a.diff_viewport = 14; // tall pane: whole file fits, draw clamps top to 0
+        a.diff_scroll = 10; // stale jump-to-first-change offset
+        a.handle_mouse(Mouse::LeftClick, 30, 3, &regions()); // visual row 2
+        assert_eq!(a.cursor, 2, "clicked row, not 10 rows below");
+        // same for the files pane
+        a.files_viewport = 10;
+        a.files_scroll = 5; // stale, but the 2-row tree fits entirely
+        a.handle_mouse(Mouse::LeftClick, 3, 8, &regions()); // visual row 1
+        assert_eq!(a.selected_file, 1);
     }
 
     #[test]
@@ -1014,15 +1210,93 @@ index 1111111..2222222 100644
 
     #[test]
     fn jk_scroll_file_viewer_when_open() {
-        let mut a = app();
-        a.right = RightPane::File;
-        a.focus = Focus::Diff;
+        let mut a = viewer_app();
+        a.diff_viewport = 2;
         let before = a.cursor;
         a.handle_key('j');
-        assert_eq!(a.fv_scroll, 1);
+        assert_eq!(a.fv_cursor, 1, "cursor moves in the viewer");
         assert_eq!(a.cursor, before, "diff cursor untouched while viewing file");
+        a.handle_key('j');
+        assert_eq!(a.fv_scroll, 1, "view follows the cursor past the viewport");
         a.handle_key('k');
-        assert_eq!(a.fv_scroll, 0);
+        a.handle_key('k');
+        assert_eq!((a.fv_cursor, a.fv_scroll), (0, 0));
+    }
+
+    fn viewer_app() -> App {
+        let mut a = app();
+        a.focus = Focus::Files;
+        a.selected_file = 1; // user.py in the changed tree
+        match a.handle_key('\n') {
+            Action::OpenFile { path } => assert_eq!(path, "user.py"),
+            other => panic!("expected OpenFile, got {other:?}"),
+        }
+        a.set_view(
+            "user.py",
+            vec![
+                (Some(1), "import os".to_string()),
+                (None, "removed = 1".to_string()), // inline deleted row
+                (Some(2), "def get_user(id):".to_string()),
+                (Some(3), "    return user".to_string()),
+            ],
+        );
+        a.focus = Focus::Diff;
+        a
+    }
+
+    #[test]
+    fn viewer_comment_on_any_line_including_unchanged() {
+        let mut a = viewer_app();
+        a.fv_cursor = 0; // "import os" — an unchanged line
+        assert_eq!(a.handle_key('c'), Action::None);
+        assert!(matches!(a.modal, Some(Modal::Input { .. })), "input opens in viewer");
+        for ch in "add typing".chars() {
+            a.handle_key(ch);
+        }
+        a.handle_key('\n');
+        let comments = a.store.comments(&a.agent_key());
+        assert_eq!(comments.len(), 1);
+        assert_eq!(comments[0].path, "user.py");
+        assert_eq!(comments[0].line_no, 1);
+        assert_eq!(comments[0].text, "add typing");
+        assert!(comments[0].quote.iter().any(|q| q.contains("import os")));
+    }
+
+    #[test]
+    fn viewer_comment_ignored_on_deleted_rows() {
+        let mut a = viewer_app();
+        a.fv_cursor = 1; // deleted row has no line number
+        a.handle_key('c');
+        assert!(a.modal.is_none(), "no input on a deleted row");
+    }
+
+    #[test]
+    fn viewer_click_places_cursor_through_scroll() {
+        let mut a = viewer_app();
+        a.fv_scroll = 1;
+        a.handle_mouse(Mouse::LeftClick, 30, 3, &regions()); // inner row 2 → 1+2=3
+        assert_eq!(a.fv_cursor, 3);
+    }
+
+    #[test]
+    fn viewer_comment_uses_repo_path_in_multi_mode() {
+        let mut a = multi_app();
+        a.focus = Focus::Files;
+        a.selected_file = 2; // api/user.py in the multi tree
+        match a.handle_key('\n') {
+            Action::OpenFile { path } => assert_eq!(path, "api/user.py"),
+            other => panic!("expected OpenFile, got {other:?}"),
+        }
+        a.set_view("api/user.py", vec![(Some(1), "import os".to_string())]);
+        a.focus = Focus::Diff;
+        a.fv_cursor = 0;
+        a.handle_key('c');
+        for ch in "hm".chars() {
+            a.handle_key(ch);
+        }
+        a.handle_key('\n');
+        let comments = a.store.comments(&a.agent_key());
+        assert_eq!(comments[0].path, "/repo/api/user.py", "absolute path for the agent");
     }
 
     fn tree_app() -> App {
@@ -1101,6 +1375,7 @@ index 1111111..2222222 100644
     #[test]
     fn files_click_maps_through_scroll_offset() {
         let mut a = tree_app();
+        a.files_viewport = 3;
         a.files_scroll = 2; // visible rows start at "main.rs"
         // y=7 is the first visible row → tree row 2 = src/main.rs
         match a.handle_mouse(Mouse::LeftClick, 3, 7, &regions()) {
@@ -1194,6 +1469,91 @@ index 1111111..2222222 100644
         a.set_diff(reordered);
         assert!(matches!(&a.rows()[1], Row::Line(l) if l.text == "a"),
             "diff file preserved across refresh");
+    }
+
+    fn multi_app() -> App {
+        let mut a = app();
+        a.set_multi_diff(vec![
+            (
+                RepoRef { root: "/repo/api".into(), label: "api".into() },
+                parse(DIFF), // user.py, config.py
+            ),
+            (
+                RepoRef { root: "/repo/web".into(), label: "web".into() },
+                parse(NESTED_DIFF), // src/app.rs, README.md
+            ),
+        ]);
+        a
+    }
+
+    #[test]
+    fn multi_repo_tree_gets_repo_roots_as_top_dirs() {
+        let a = multi_app();
+        let rows = a.files_tree_rows();
+        let names: Vec<(usize, &str, bool)> =
+            rows.iter().map(|r| (r.depth, r.name.as_str(), r.is_dir)).collect();
+        assert_eq!(
+            names,
+            vec![
+                (0, "api", true),
+                (1, "config.py", false),
+                (1, "user.py", false),
+                (0, "web", true),
+                (1, "src", true),
+                (2, "app.rs", false),
+                (1, "README.md", false),
+            ]
+        );
+    }
+
+    #[test]
+    fn single_repo_group_keeps_plain_tree() {
+        let mut a = app();
+        a.set_multi_diff(vec![(
+            RepoRef { root: "/repo/api".into(), label: "api".into() },
+            parse(DIFF),
+        )]);
+        let rows = a.files_tree_rows();
+        assert_eq!(rows[0].name, "config.py", "no repo prefix for a single repo");
+        // but the root is still known for file reads
+        let (root, rel) = a.current_file_location().unwrap();
+        assert_eq!(root.unwrap(), std::path::Path::new("/repo/api"));
+        assert_eq!(rel, "user.py");
+    }
+
+    #[test]
+    fn multi_repo_click_shows_diff_of_other_repo_file() {
+        let mut a = multi_app();
+        // rows: api(y7), config.py(y8), user.py(y9), web(y10), src(y11), app.rs(y12), README.md(y13)
+        a.handle_mouse(Mouse::LeftClick, 3, 12, &regions()); // web/src/app.rs
+        assert!(matches!(&a.rows()[1], Row::Line(l) if l.text == "old"), "web repo diff shown");
+        let (root, rel) = a.current_file_location().unwrap();
+        assert_eq!(root.unwrap(), std::path::Path::new("/repo/web"));
+        assert_eq!(rel, "src/app.rs");
+    }
+
+    #[test]
+    fn multi_repo_comment_anchor_uses_absolute_path() {
+        let mut a = multi_app();
+        a.focus = Focus::Diff;
+        a.cursor = 3; // "+    return user" of api/user.py (hunk fallback rows)
+        let (path, _, line, _) = a.anchor_at_cursor().unwrap();
+        assert_eq!(path, "/repo/api/user.py");
+        assert_eq!(line, 42);
+    }
+
+    #[test]
+    fn multi_repo_refresh_preserves_current_file_by_display_path() {
+        let mut a = multi_app();
+        a.handle_mouse(Mouse::LeftClick, 3, 12, &regions()); // web/src/app.rs
+        // same groups reversed
+        a.set_multi_diff(vec![
+            (RepoRef { root: "/repo/web".into(), label: "web".into() }, parse(NESTED_DIFF)),
+            (RepoRef { root: "/repo/api".into(), label: "api".into() }, parse(DIFF)),
+        ]);
+        let (root, rel) = a.current_file_location().unwrap();
+        assert_eq!(root.unwrap(), std::path::Path::new("/repo/web"));
+        assert_eq!(rel, "src/app.rs");
     }
 
     #[test]

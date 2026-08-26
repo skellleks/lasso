@@ -7,7 +7,17 @@ use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct AgentSession {
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct Agent {
+    #[serde(default)]
+    pub agent_session: Option<AgentSession>,
     pub pane_id: String,
     pub agent: String,
     pub agent_status: String,
@@ -169,6 +179,7 @@ mod tests {
     const LIST: &str = r#"{"id":"cli:agent:list","result":{"agents":[
         {"agent":"claude","agent_status":"idle","cwd":"/repo/api",
          "pane_id":"w1:p1","tab_id":"w1:t1","workspace_id":"w1",
+         "agent_session":{"agent":"claude","kind":"id","source":"herdr:claude","value":"abc-123"},
          "terminal_title_stripped":"fix login"},
         {"agent":"codex","agent_status":"working","cwd":"/repo/web",
          "pane_id":"w1:p2","tab_id":"w1:t2","workspace_id":"w1"}
@@ -182,6 +193,9 @@ mod tests {
         assert_eq!(agents[0].agent_status, "idle");
         assert_eq!(agents[0].cwd, "/repo/api");
         assert_eq!(agents[0].terminal_title_stripped, "fix login");
+        let session = agents[0].agent_session.as_ref().unwrap();
+        assert_eq!((session.kind.as_str(), session.value.as_str()), ("id", "abc-123"));
+        assert!(agents[1].agent_session.is_none());
         assert_eq!(agents[1].agent, "codex");
     }
 

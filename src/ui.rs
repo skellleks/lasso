@@ -154,7 +154,7 @@ const ADD_BG: Color = Color::Rgb(6, 43, 3);
 const DEL_BG: Color = Color::Rgb(62, 3, 1);
 const CUR_ADD_BG: Color = Color::Rgb(14, 68, 8);
 const CUR_DEL_BG: Color = Color::Rgb(92, 10, 6);
-const CUR_CTX_BG: Color = Color::Rgb(38, 44, 56);
+const CUR_CTX_BG: Color = Color::Rgb(67, 76, 94);
 /// Brighter fills for the exact tokens that changed within a line pair.
 const ADD_EM_BG: Color = Color::Rgb(24, 110, 18);
 const DEL_EM_BG: Color = Color::Rgb(150, 24, 16);
@@ -197,7 +197,7 @@ fn draw_agents(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn file_badge(app: &App, path: &str) -> Span<'static> {
-    match app.files.iter().find(|f| f.new_path == path).map(|f| &f.status) {
+    match app.file_index_by_display(path).and_then(|i| app.files.get(i)).map(|f| &f.status) {
         Some(crate::diff::FileStatus::Added) => Span::styled("A", Style::default().fg(Color::Green)),
         Some(crate::diff::FileStatus::Deleted) => Span::styled("D", Style::default().fg(Color::Red)),
         Some(crate::diff::FileStatus::Renamed) => Span::styled("R", Style::default().fg(Color::Magenta)),
@@ -254,7 +254,7 @@ fn draw_diff(f: &mut Frame, app: &App, area: Rect) {
     let title = app
         .files
         .get(app.diff_file)
-        .map(|fd| format!("diff: {}", fd.new_path))
+        .map(|_| format!("diff: {}", app.current_diff_path().unwrap_or_default()))
         .unwrap_or_else(|| "diff".to_string());
     let block = Block::default()
         .title(title)
@@ -272,7 +272,7 @@ fn draw_diff(f: &mut Frame, app: &App, area: Rect) {
     let emphasis = emphasis_for(&rows);
     let height = area.height.saturating_sub(2) as usize;
     let top = app.diff_scroll.min(rows.len().saturating_sub(height.max(1)));
-    let path = app.files.get(app.diff_file).map(|f| f.new_path.clone()).unwrap_or_default();
+    let path = app.current_diff_path().unwrap_or_default();
     let width = area.width.saturating_sub(2) as usize;
     let mut lines: Vec<Line> = Vec::new();
     for (i, row) in rows.iter().enumerate().skip(top).take(height.max(1)) {
@@ -339,7 +339,7 @@ fn draw_diff(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn commented_lines(app: &App) -> Vec<(Side, u32)> {
-    let path = app.files.get(app.diff_file).map(|f| f.new_path.as_str()).unwrap_or("");
+    let path = app.comment_path().unwrap_or_default();
     app.store
         .comments(&app.agent_key())
         .iter()
@@ -353,14 +353,28 @@ fn draw_file_view(f: &mut Frame, app: &App, fv: &FileView, area: Rect) {
         .title(format!("file: {}", fv.path))
         .borders(Borders::ALL)
         .border_style(border_style(true));
+    let commented: Vec<u32> = app
+        .view_comment_path()
+        .map(|path| {
+            app.store
+                .comments(&app.agent_key())
+                .iter()
+                .filter(|c| c.path == path)
+                .map(|c| c.line_no)
+                .collect()
+        })
+        .unwrap_or_default();
+    let width = area.width.saturating_sub(2) as usize;
     let mut no = 0usize;
-    let lines: Vec<Line> = fv
-        .lines
-        .iter()
-        .map(|fl| match fl {
+    let mut lines: Vec<Line> = Vec::new();
+    for (i, fl) in fv.lines.iter().enumerate() {
+        let cursor_here = i == app.fv_cursor && app.right == RightPane::File;
+        let line = match fl {
             FvLine::Content { line, changed } => {
                 no += 1;
-                let gutter = if *changed {
+                let gutter = if commented.contains(&(no as u32)) {
+                    Span::styled("●", Style::default().fg(Color::Yellow))
+                } else if *changed {
                     Span::styled("▎", Style::default().fg(Color::Green))
                 } else {
                     Span::raw(" ")
@@ -368,17 +382,36 @@ fn draw_file_view(f: &mut Frame, app: &App, fv: &FileView, area: Rect) {
                 let mut spans =
                     vec![gutter, Span::styled(format!("{no:>5} "), Style::default().fg(Color::DarkGray))];
                 spans.extend(slice_spans(&line.spans, app.hscroll as usize));
-                Line::from(spans)
+                if cursor_here {
+                    let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+                    if used < width {
+                        spans.push(Span::raw(" ".repeat(width - used)));
+                    }
+                    Line::from(spans).style(Style::default().bg(CUR_CTX_BG))
+                } else {
+                    Line::from(spans)
+                }
             }
             FvLine::Deleted { text } => {
                 let span = Span::styled(format!("- {text}"), Style::default().fg(Color::Red));
-                Line::from(vec![
-                    Span::styled("      ", Style::default()),
-                    span,
-                ])
+                Line::from(vec![Span::styled("      ", Style::default()), span])
             }
-        })
-        .collect();
+        };
+        lines.push(line);
+        // inline comment input right under the viewer cursor
+        if cursor_here {
+            if let Some(Modal::Input { buffer }) = &app.modal {
+                lines.push(Line::from(vec![
+                    Span::styled("       └ ", Style::default().fg(Color::Yellow)),
+                    Span::styled(
+                        format!("{buffer}▏"),
+                        Style::default().fg(Color::Black).bg(Color::Yellow),
+                    ),
+                    Span::styled("  (Enter to save, Esc to cancel)", Style::default().fg(Color::DarkGray)),
+                ]));
+            }
+        }
+    }
     f.render_widget(Paragraph::new(lines).scroll((app.fv_scroll, 0)).block(block), area);
 }
 
@@ -790,6 +823,46 @@ index 1111111..2222222 100644
                 "hints fill the width at {width}: end={end}, line: {line}"
             );
         }
+    }
+
+    #[test]
+    fn viewer_cursor_band_marker_and_inline_input() {
+        let mut app = test_app();
+        app.focus = Focus::Files;
+        app.selected_file = 0; // user.py — the only changed file in this fixture
+        assert!(matches!(app.handle_key('\n'), crate::app::Action::OpenFile { .. }));
+        app.set_view(
+            "user.py",
+            vec![
+                (Some(1), "import os".to_string()),
+                (Some(2), "def get_user(id):".to_string()),
+            ],
+        );
+        app.focus = Focus::Diff;
+        let fv = FileView {
+            path: "user.py".into(),
+            lines: vec![
+                FvLine::Content { line: Line::from("import os"), changed: false },
+                FvLine::Content { line: Line::from("def get_user(id):"), changed: false },
+            ],
+        };
+        // comment on line 1, then open input on line 2
+        app.fv_cursor = 0;
+        app.handle_key('c');
+        for ch in "note".chars() {
+            app.handle_key(ch);
+        }
+        app.handle_key('\n');
+        app.handle_key('j');
+        app.handle_key('c');
+        app.handle_key('h');
+        app.handle_key('i');
+        let screen = render(&app, &fv);
+        let lines: Vec<&str> = screen.lines().collect();
+        let import_row = lines.iter().position(|l| l.contains("import os")).unwrap();
+        assert!(lines[import_row].contains('●'), "comment marker on line 1: {}", lines[import_row]);
+        let def_row = lines.iter().position(|l| l.contains("def get_user")).unwrap();
+        assert!(lines[def_row + 1].contains("hi"), "inline input under viewer cursor");
     }
 
     #[test]

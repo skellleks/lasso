@@ -96,6 +96,26 @@ fn synthesize_added(root: &Path, path: &str) -> FileDiff {
     }
 }
 
+/// Group absolute file paths by the git repo containing them; paths outside
+/// any repo are dropped. Keys are repo roots.
+pub fn group_by_repo(paths: &std::collections::BTreeSet<String>) -> std::collections::BTreeMap<PathBuf, Vec<String>> {
+    let mut root_cache: std::collections::BTreeMap<PathBuf, Option<PathBuf>> =
+        std::collections::BTreeMap::new();
+    let mut out: std::collections::BTreeMap<PathBuf, Vec<String>> = std::collections::BTreeMap::new();
+    for path in paths {
+        let p = Path::new(path);
+        let Some(dir) = p.parent() else { continue };
+        let root = root_cache
+            .entry(dir.to_path_buf())
+            .or_insert_with(|| repo_root(dir))
+            .clone();
+        if let Some(root) = root {
+            out.entry(root).or_default().push(path.clone());
+        }
+    }
+    out
+}
+
 fn git(root: &Path, args: &[&str]) -> Result<String> {
     let out = Command::new("git")
         .arg("-C")
@@ -198,6 +218,32 @@ mod tests {
         let files = full_diff(dir.path(), DiffBase::MergeBase).unwrap();
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].new_path, "feat.txt");
+    }
+
+    #[test]
+    fn group_by_repo_buckets_and_drops_outsiders() {
+        let a = init_repo();
+        let b = init_repo();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::create_dir(a.path().join("sub")).unwrap();
+        let paths: std::collections::BTreeSet<String> = [
+            a.path().join("a.txt"),
+            a.path().join("sub/deep.txt"),
+            b.path().join("a.txt"),
+            outside.path().join("loose.txt"),
+        ]
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+        let groups = group_by_repo(&paths);
+        assert_eq!(groups.len(), 2, "outsider dropped: {groups:?}");
+        let a_root = a.path().canonicalize().unwrap();
+        let files = groups
+            .iter()
+            .find(|(r, _)| r.canonicalize().unwrap() == a_root)
+            .map(|(_, f)| f.len())
+            .unwrap();
+        assert_eq!(files, 2, "both files of repo A grouped");
     }
 
     #[test]

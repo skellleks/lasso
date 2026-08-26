@@ -21,6 +21,13 @@ prompt. Plus a syntax-highlighted file viewer.
 - **Files** — changed files of the selected agent (`a` toggles all files).
 - Untracked files are shown as fully added. Diff auto-refreshes when an
   agent's status changes (socket subscription) and every 5s.
+- **Multi-repo**: when the agent edited files outside its own repo (per its
+  Claude Code session transcript), those repos appear in the tree as
+  top-level nodes with their own diffs. Comments then carry absolute paths
+  so the agent can act on them from any cwd.
+- Each window is pinned to one agent forever; open one window per agent
+  (re-invoking the hotkey on the same agent replaces its window, on the
+  lasso pane itself closes it).
 
 ## Keys
 
