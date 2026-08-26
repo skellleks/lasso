@@ -351,40 +351,59 @@ fn repo_ref(root: &std::path::Path, taken: &[(app::RepoRef, Vec<crate::diff::Fil
     app::RepoRef { root: root.to_path_buf(), label }
 }
 
-/// Git roots of the files this window's agent edited, from its Claude Code
-/// transcript. Cached by (path, mtime) — transcripts get large.
+/// Git roots of the files this window's agent edited, from the Claude Code
+/// transcripts of its project. Sessions rotate (/clear, restarts), so all
+/// transcripts touched within the last 24h are aggregated, not just the
+/// current session. Cached per file by mtime — transcripts get large.
 fn transcript_repo_roots(app: &App) -> Vec<PathBuf> {
     use std::sync::{Mutex, OnceLock};
     type Cache = std::collections::HashMap<PathBuf, (std::time::SystemTime, Vec<PathBuf>)>;
     static CACHE: OnceLock<Mutex<Cache>> = OnceLock::new();
+    const RECENT: Duration = Duration::from_secs(24 * 3600);
 
     let Some(agent) = app.agent() else { return Vec::new() };
     if agent.agent != "claude" {
         return Vec::new();
     }
-    let Some(session) = agent.agent_session.as_ref().filter(|s| s.kind == "id") else {
-        return Vec::new();
-    };
     let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else { return Vec::new() };
-    let path = transcript::transcript_path(&home, &agent.cwd, &session.value);
-    let Ok(mtime) = std::fs::metadata(&path).and_then(|m| m.modified()) else {
-        return Vec::new();
-    };
+    let dir = transcript::project_dir(&home, &agent.cwd);
+    let Ok(entries) = std::fs::read_dir(&dir) else { return Vec::new() };
+    let now = std::time::SystemTime::now();
     let cache = CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
-    if let Ok(guard) = cache.lock() {
-        if let Some((t, roots)) = guard.get(&path) {
-            if *t == mtime {
-                return roots.clone();
+
+    let mut roots: Vec<PathBuf> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+            continue;
+        }
+        let Ok(mtime) = entry.metadata().and_then(|m| m.modified()) else { continue };
+        if now.duration_since(mtime).map(|age| age > RECENT).unwrap_or(false) {
+            continue;
+        }
+        let cached = cache
+            .lock()
+            .ok()
+            .and_then(|g| g.get(&path).filter(|(t, _)| *t == mtime).map(|(_, r)| r.clone()));
+        let file_roots = match cached {
+            Some(r) => r,
+            None => {
+                let r: Vec<PathBuf> = std::fs::read_to_string(&path)
+                    .map(|jsonl| {
+                        gitio::group_by_repo(&transcript::edited_files(&jsonl)).into_keys().collect()
+                    })
+                    .unwrap_or_default();
+                if let Ok(mut guard) = cache.lock() {
+                    guard.insert(path, (mtime, r.clone()));
+                }
+                r
+            }
+        };
+        for r in file_roots {
+            if !roots.contains(&r) {
+                roots.push(r);
             }
         }
-    }
-    let roots: Vec<PathBuf> = std::fs::read_to_string(&path)
-        .map(|jsonl| {
-            gitio::group_by_repo(&transcript::edited_files(&jsonl)).into_keys().collect()
-        })
-        .unwrap_or_default();
-    if let Ok(mut guard) = cache.lock() {
-        guard.insert(path, (mtime, roots.clone()));
     }
     roots
 }

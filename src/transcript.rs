@@ -37,17 +37,14 @@ pub fn edited_files(jsonl: &str) -> BTreeSet<String> {
     out
 }
 
-/// Where Claude Code stores the transcript for a session started in `cwd`:
-/// `~/.claude/projects/<munged cwd>/<session id>.jsonl`.
-pub fn transcript_path(home: &std::path::Path, cwd: &str, session_id: &str) -> PathBuf {
+/// Claude Code's per-project transcript directory for sessions started in
+/// `cwd`: `~/.claude/projects/<munged cwd>/`.
+pub fn project_dir(home: &std::path::Path, cwd: &str) -> PathBuf {
     let munged: String = cwd
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect();
-    home.join(".claude")
-        .join("projects")
-        .join(munged)
-        .join(format!("{session_id}.jsonl"))
+    home.join(".claude").join("projects").join(munged)
 }
 
 #[cfg(test)]
@@ -78,18 +75,12 @@ not json at all
     }
 
     #[test]
-    fn transcript_path_munges_cwd_like_claude_code() {
-        let p = transcript_path(
-            std::path::Path::new("/Users/admin"),
-            "/Users/admin/Documents/work/mono/APIDATA",
-            "46cce160-53bb-4610-a054-a559ca33d696",
-        );
+    fn project_dir_munges_cwd_like_claude_code() {
         assert_eq!(
-            p,
-            PathBuf::from("/Users/admin/.claude/projects/-Users-admin-Documents-work-mono-APIDATA/46cce160-53bb-4610-a054-a559ca33d696.jsonl")
+            project_dir(std::path::Path::new("/Users/admin"), "/Users/admin/Documents/work/mono/digital_goods"),
+            PathBuf::from("/Users/admin/.claude/projects/-Users-admin-Documents-work-mono-digital-goods"),
+            "underscores are munged too"
         );
-        // dots and underscores are munged too
-        let p = transcript_path(std::path::Path::new("/h"), "/a/b.c_d", "id");
-        assert_eq!(p, PathBuf::from("/h/.claude/projects/-a-b-c-d/id.jsonl"));
     }
+
 }
