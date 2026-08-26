@@ -48,7 +48,7 @@ red where they used to be.
 | `d` / `Esc` | back to diff |
 | `c` | comment on the current diff line |
 | `x` | delete last comment |
-| `S` | submit all comments to the agent as one prompt |
+| `Shift+S` | submit all comments to the agent as one prompt |
 | `b` | diff base: HEAD ⇄ merge-base with main/master |
 | `a` | files: changed ⇄ all |
 | `r` | refresh |
