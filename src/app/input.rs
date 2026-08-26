@@ -9,7 +9,10 @@ impl App {
             return Action::None;
         }
         let inside = |r: &ratatui::layout::Rect| {
-            x > r.x && x < r.x + r.width.saturating_sub(1) && y > r.y && y < r.y + r.height.saturating_sub(1)
+            x > r.x
+                && x < r.x + r.width.saturating_sub(1)
+                && y > r.y
+                && y < r.y + r.height.saturating_sub(1)
         };
         if inside(&regions.agents) {
             // pinned-agent header: not interactive
@@ -22,7 +25,9 @@ impl App {
                 regions.files.height.saturating_sub(2) as usize
             };
             // the same clamped top the renderer uses
-            let top = self.files_scroll.min(len.saturating_sub(files_viewport.max(1)));
+            let top = self
+                .files_scroll
+                .min(len.saturating_sub(files_viewport.max(1)));
             let idx = top + (y - regions.files.y - 1) as usize;
             match m {
                 Mouse::LeftClick => {
@@ -66,7 +71,8 @@ impl App {
                         _ => {
                             self.focus = Focus::Diff;
                             if !self.view_model.is_empty() {
-                                let row = self.fv_scroll as usize + (y - regions.right.y - 1) as usize;
+                                let row =
+                                    self.fv_scroll as usize + (y - regions.right.y - 1) as usize;
                                 self.fv_cursor = row.min(self.view_model.len() - 1);
                             }
                         }
@@ -168,9 +174,13 @@ impl App {
                 Action::None
             }
             '\n' if self.focus == Focus::Files => self.activate_tree_row(self.selected_file),
-            'c' if !self.standalone && (self.focus == Focus::Diff || self.right == RightPane::File) => {
+            'c' if !self.standalone
+                && (self.focus == Focus::Diff || self.right == RightPane::File) =>
+            {
                 if self.current_anchor().is_some() {
-                    self.modal = Some(Modal::Input { buffer: String::new() });
+                    self.modal = Some(Modal::Input {
+                        buffer: String::new(),
+                    });
                 }
                 Action::None
             }
@@ -196,7 +206,13 @@ impl App {
                             let agent_key = self.agent_key();
                             self.store.add(
                                 &agent_key,
-                                Comment { path, side, line_no, quote, text: buffer.trim().to_string() },
+                                Comment {
+                                    path,
+                                    side,
+                                    line_no,
+                                    quote,
+                                    text: buffer.trim().to_string(),
+                                },
                             );
                         }
                     }

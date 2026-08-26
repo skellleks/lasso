@@ -172,13 +172,17 @@ impl App {
     }
 
     pub fn agent_key(&self) -> String {
-        self.agent().map(Agent::key).unwrap_or_else(|| "standalone".to_string())
+        self.agent()
+            .map(Agent::key)
+            .unwrap_or_else(|| "standalone".to_string())
     }
 
     /// Update the pinned agent from a fresh agent list. When its pane is
     /// gone, the last known info is kept with status "gone".
     pub fn set_agents(&mut self, agents: Vec<Agent>) {
-        let Some(pinned) = self.pinned_pane.clone() else { return };
+        let Some(pinned) = self.pinned_pane.clone() else {
+            return;
+        };
         match agents.into_iter().find(|a| a.pane_id == pinned) {
             Some(a) => self.agent = Some(a),
             None => {
@@ -224,7 +228,9 @@ impl App {
         let prev_sel = if self.all_files_mode {
             None
         } else {
-            self.files_tree_rows().get(self.selected_file).map(|r| r.path.clone())
+            self.files_tree_rows()
+                .get(self.selected_file)
+                .map(|r| r.path.clone())
         };
         self.files.clear();
         self.repos.clear();
@@ -257,7 +263,9 @@ impl App {
         let selected_path = if self.all_files_mode {
             None // tree of all files is independent of the diff
         } else {
-            self.files_tree_rows().get(self.selected_file).map(|r| r.path.clone())
+            self.files_tree_rows()
+                .get(self.selected_file)
+                .map(|r| r.path.clone())
         };
         self.files = files;
         self.repos.clear();
@@ -329,7 +337,11 @@ impl App {
                 if let Some(pending) = dels.remove(&no) {
                     rows.extend(pending.into_iter().map(Row::Line));
                 }
-                let kind = if added.contains(&no) { LineKind::Add } else { LineKind::Context };
+                let kind = if added.contains(&no) {
+                    LineKind::Add
+                } else {
+                    LineKind::Context
+                };
                 rows.push(Row::Line(DiffLine {
                     kind,
                     old_no: None,
@@ -362,8 +374,9 @@ impl App {
         if self.all_files_mode {
             self.tree_rows()
         } else {
-            let paths: Vec<String> =
-                (0..self.files.len()).filter_map(|i| self.display_path(i)).collect();
+            let paths: Vec<String> = (0..self.files.len())
+                .filter_map(|i| self.display_path(i))
+                .collect();
             crate::tree::visible_rows(&paths, &self.collapsed)
         }
     }
@@ -371,7 +384,9 @@ impl App {
     /// Enter on a tree row: toggle a dir or open the file in the viewer.
     fn activate_tree_row(&mut self, idx: usize) -> Action {
         let rows = self.files_tree_rows();
-        let Some(row) = rows.get(idx) else { return Action::None };
+        let Some(row) = rows.get(idx) else {
+            return Action::None;
+        };
         if row.is_dir {
             self.toggle_dir(&row.path.clone());
             Action::None
@@ -381,7 +396,9 @@ impl App {
             self.fv_scroll = 0;
             self.fv_cursor = 0;
             self.hscroll = 0;
-            Action::OpenFile { path: row.path.clone() }
+            Action::OpenFile {
+                path: row.path.clone(),
+            }
         }
     }
 
@@ -389,7 +406,9 @@ impl App {
     /// viewer in all-files mode, where most files have no diff).
     fn click_tree_row(&mut self, idx: usize) -> Action {
         let rows = self.files_tree_rows();
-        let Some(row) = rows.get(idx) else { return Action::None };
+        let Some(row) = rows.get(idx) else {
+            return Action::None;
+        };
         if row.is_dir {
             self.toggle_dir(&row.path.clone());
             return Action::None;
@@ -411,7 +430,9 @@ impl App {
         if !self.collapsed.remove(path) {
             self.collapsed.insert(path.to_string());
         }
-        self.selected_file = self.selected_file.min(self.files_tree_rows().len().saturating_sub(1));
+        self.selected_file = self
+            .selected_file
+            .min(self.files_tree_rows().len().saturating_sub(1));
     }
 
     /// After the tree selection moved, point the diff at the selected file.
@@ -444,7 +465,11 @@ impl App {
     pub fn path_for_display(&self, display: &str) -> String {
         if let Some(i) = self.file_index_by_display(display) {
             if let Some(root) = self.file_repo.get(i).and_then(|&r| self.repos.get(r)) {
-                return root.root.join(&self.files[i].new_path).to_string_lossy().into_owned();
+                return root
+                    .root
+                    .join(&self.files[i].new_path)
+                    .to_string_lossy()
+                    .into_owned();
             }
             return self.files[i].new_path.clone();
         }

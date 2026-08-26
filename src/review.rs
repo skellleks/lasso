@@ -38,11 +38,17 @@ impl ReviewStore {
     }
 
     pub fn comments(&self, agent_key: &str) -> &[Comment] {
-        self.by_agent.get(agent_key).map(Vec::as_slice).unwrap_or(&[])
+        self.by_agent
+            .get(agent_key)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
     }
 
     pub fn add(&mut self, agent_key: &str, comment: Comment) {
-        self.by_agent.entry(agent_key.to_string()).or_default().push(comment);
+        self.by_agent
+            .entry(agent_key.to_string())
+            .or_default()
+            .push(comment);
         self.save();
     }
 
@@ -97,7 +103,10 @@ mod tests {
                 path: "app/user.py".into(),
                 side: Side::New,
                 line_no: 42,
-                quote: vec!["-    return None".into(), "+    user = repo.find(id)".into()],
+                quote: vec![
+                    "-    return None".into(),
+                    "+    user = repo.find(id)".into(),
+                ],
                 text: "should raise 404 here, not return None".into(),
             },
             Comment {

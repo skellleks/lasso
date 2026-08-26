@@ -53,8 +53,11 @@ pub(super) fn draw_diff(f: &mut Frame, app: &App, area: Rect) {
         .border_style(border_style(app.focus == Focus::Diff));
 
     if rows.is_empty() {
-        let msg = Paragraph::new(Span::styled("clean — no changes", Style::default().fg(Color::DarkGray)))
-            .block(block);
+        let msg = Paragraph::new(Span::styled(
+            "clean — no changes",
+            Style::default().fg(Color::DarkGray),
+        ))
+        .block(block);
         f.render_widget(msg, area);
         return;
     }
@@ -62,7 +65,9 @@ pub(super) fn draw_diff(f: &mut Frame, app: &App, area: Rect) {
     let commented = commented_lines(app);
     let emphasis = emphasis_for(&rows);
     let height = area.height.saturating_sub(2) as usize;
-    let top = app.diff_scroll.min(rows.len().saturating_sub(height.max(1)));
+    let top = app
+        .diff_scroll
+        .min(rows.len().saturating_sub(height.max(1)));
     let path = app.current_diff_path().unwrap_or_default();
     let width = area.width.saturating_sub(2) as usize;
     let mut lines: Vec<Line> = Vec::new();
@@ -86,18 +91,35 @@ pub(super) fn draw_diff(f: &mut Frame, app: &App, area: Rect) {
                     (LineKind::Context, true) => (" ", Color::DarkGray, Some(CUR_CTX_BG)),
                 };
                 let no = l.new_no.or(l.old_no).unwrap_or(0);
-                let side = if l.kind == LineKind::Del { Side::Old } else { Side::New };
-                let mark = if commented.contains(&(side, no)) { "●" } else { " " };
+                let side = if l.kind == LineKind::Del {
+                    Side::Old
+                } else {
+                    Side::New
+                };
+                let mark = if commented.contains(&(side, no)) {
+                    "●"
+                } else {
+                    " "
+                };
 
                 let mut text_spans = crate::highlight::highlight_line(&path, &l.text);
                 if let Some(ranges) = emphasis.get(&i) {
-                    let em = if l.kind == LineKind::Add { ADD_EM_BG } else { DEL_EM_BG };
+                    let em = if l.kind == LineKind::Add {
+                        ADD_EM_BG
+                    } else {
+                        DEL_EM_BG
+                    };
                     text_spans = apply_bg_ranges(&text_spans, ranges, em);
                 }
-                let mut content = vec![Span::styled(sign.to_string(), Style::default().fg(sign_color))];
+                let mut content = vec![Span::styled(
+                    sign.to_string(),
+                    Style::default().fg(sign_color),
+                )];
                 content.extend(text_spans);
-                let mut spans =
-                    vec![Span::styled(format!("{mark}{no:>5} "), Style::default().fg(Color::DarkGray))];
+                let mut spans = vec![Span::styled(
+                    format!("{mark}{no:>5} "),
+                    Style::default().fg(Color::DarkGray),
+                )];
                 spans.extend(slice_spans(&content, app.hscroll as usize));
                 // fill the whole row so add/del lines read as colored bands
                 let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
@@ -121,7 +143,10 @@ pub(super) fn draw_diff(f: &mut Frame, app: &App, area: Rect) {
                         format!("{buffer}▏"),
                         Style::default().fg(Color::Black).bg(Color::Yellow),
                     ),
-                    Span::styled("  (Enter to save, Esc to cancel)", Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        "  (Enter to save, Esc to cancel)",
+                        Style::default().fg(Color::DarkGray),
+                    ),
                 ]));
             }
         }

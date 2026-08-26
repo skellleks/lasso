@@ -7,11 +7,23 @@ pub(super) fn draw_agents(f: &mut Frame, app: &App, area: Rect) {
         (Some(a), _) => Line::from(vec![
             status_badge(&a.agent_status),
             Span::raw(" "),
-            Span::styled(a.label().to_string(), Style::default().add_modifier(Modifier::BOLD)),
-            Span::styled(format!("  {}", a.agent_status), Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                a.label().to_string(),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("  {}", a.agent_status),
+                Style::default().fg(Color::DarkGray),
+            ),
         ]),
-        (None, true) => Line::from(Span::styled("standalone", Style::default().fg(Color::DarkGray))),
-        (None, false) => Line::from(Span::styled("no agent", Style::default().fg(Color::DarkGray))),
+        (None, true) => Line::from(Span::styled(
+            "standalone",
+            Style::default().fg(Color::DarkGray),
+        )),
+        (None, false) => Line::from(Span::styled(
+            "no agent",
+            Style::default().fg(Color::DarkGray),
+        )),
     };
     let block = Block::default()
         .title("Agent")
@@ -23,7 +35,9 @@ pub(super) fn draw_agents(f: &mut Frame, app: &App, area: Rect) {
 pub(super) fn draw_files(f: &mut Frame, app: &App, area: Rect) {
     let height = area.height.saturating_sub(2) as usize;
     let rows = app.files_tree_rows();
-    let skip = app.files_scroll.min(rows.len().saturating_sub(height.max(1)));
+    let skip = app
+        .files_scroll
+        .min(rows.len().saturating_sub(height.max(1)));
     let items: Vec<ListItem> = rows
         .iter()
         .enumerate()
@@ -54,7 +68,11 @@ pub(super) fn draw_files(f: &mut Frame, app: &App, area: Rect) {
             }
         })
         .collect();
-    let title = if app.all_files_mode { "Files (all)" } else { "Files" };
+    let title = if app.all_files_mode {
+        "Files (all)"
+    } else {
+        "Files"
+    };
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
@@ -93,8 +111,10 @@ pub(super) fn draw_file_view(f: &mut Frame, app: &App, fv: &FileView, area: Rect
                 } else {
                     Span::raw(" ")
                 };
-                let mut spans =
-                    vec![gutter, Span::styled(format!("{no:>5} "), Style::default().fg(Color::DarkGray))];
+                let mut spans = vec![
+                    gutter,
+                    Span::styled(format!("{no:>5} "), Style::default().fg(Color::DarkGray)),
+                ];
                 spans.extend(slice_spans(&line.spans, app.hscroll as usize));
                 if cursor_here {
                     let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
@@ -121,16 +141,26 @@ pub(super) fn draw_file_view(f: &mut Frame, app: &App, fv: &FileView, area: Rect
                         format!("{buffer}▏"),
                         Style::default().fg(Color::Black).bg(Color::Yellow),
                     ),
-                    Span::styled("  (Enter to save, Esc to cancel)", Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        "  (Enter to save, Esc to cancel)",
+                        Style::default().fg(Color::DarkGray),
+                    ),
                 ]));
             }
         }
     }
-    f.render_widget(Paragraph::new(lines).scroll((app.fv_scroll, 0)).block(block), area);
+    f.render_widget(
+        Paragraph::new(lines)
+            .scroll((app.fv_scroll, 0))
+            .block(block),
+        area,
+    );
 }
 
 pub(super) fn draw_status(f: &mut Frame, app: &App, area: Rect) {
-    const KEY: Style = Style::new().fg(Color::Rgb(136, 192, 208)).bg(Color::Rgb(46, 52, 64));
+    const KEY: Style = Style::new()
+        .fg(Color::Rgb(136, 192, 208))
+        .bg(Color::Rgb(46, 52, 64));
     const LABEL: Style = Style::new().fg(Color::Rgb(97, 110, 136));
     const SEP: Style = Style::new().fg(Color::Rgb(59, 66, 82));
 
@@ -184,14 +214,19 @@ pub(super) fn draw_status(f: &mut Frame, app: &App, area: Rect) {
     // right side: state badges
     let mut right: Vec<Span> = Vec::new();
     if app.standalone {
-        right.push(Span::styled(" standalone ", Style::default().fg(Color::Black).bg(Color::Yellow)));
+        right.push(Span::styled(
+            " standalone ",
+            Style::default().fg(Color::Black).bg(Color::Yellow),
+        ));
         right.push(Span::raw(" "));
     }
     let count = app.store.comments(&app.agent_key()).len();
     if count > 0 {
         right.push(Span::styled(
             format!(" ✎ {count} "),
-            Style::default().fg(Color::Black).bg(Color::Rgb(235, 203, 139)),
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Rgb(235, 203, 139)),
         ));
         right.push(Span::raw(" "));
     }
@@ -219,7 +254,13 @@ pub(super) fn draw_status(f: &mut Frame, app: &App, area: Rect) {
             let per = extra / seps.len();
             let mut rem = extra % seps.len();
             for &i in &seps {
-                let add = per + if rem > 0 { rem -= 1; 1 } else { 0 };
+                let add = per
+                    + if rem > 0 {
+                        rem -= 1;
+                        1
+                    } else {
+                        0
+                    };
                 let widened = format!("{}{}", spans[i].content, " ".repeat(add));
                 spans[i] = Span::styled(widened, spans[i].style);
             }

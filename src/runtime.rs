@@ -66,7 +66,19 @@ pub(crate) fn open_pane() -> Result<()> {
     }
 
     let mut cmd = std::process::Command::new(herdr::herdr_bin());
-    cmd.args(["plugin", "pane", "open", "--plugin", "lasso", "--entrypoint", "review", "--placement", "split", "--direction", "right"]);
+    cmd.args([
+        "plugin",
+        "pane",
+        "open",
+        "--plugin",
+        "lasso",
+        "--entrypoint",
+        "review",
+        "--placement",
+        "split",
+        "--direction",
+        "right",
+    ]);
     if let Some(t) = &target {
         cmd.args(["--target-pane", t]);
     } else if let Ok(ws) = std::env::var("HERDR_WORKSPACE_ID") {
@@ -77,9 +89,10 @@ pub(crate) fn open_pane() -> Result<()> {
         eprintln!("{}", String::from_utf8_lossy(&out.stderr));
         std::process::exit(1);
     }
-    if let (Some(t), Some(opened)) =
-        (&target, herdr::parse_opened_pane_id(&String::from_utf8_lossy(&out.stdout)))
-    {
+    if let (Some(t), Some(opened)) = (
+        &target,
+        herdr::parse_opened_pane_id(&String::from_utf8_lossy(&out.stdout)),
+    ) {
         map.insert(t.clone(), opened);
         let _ = std::fs::create_dir_all(state_dir());
         let _ = std::fs::write(&map_path, serde_json::to_vec_pretty(&map)?);
@@ -112,7 +125,11 @@ pub(crate) fn apply_action(
             };
             app.status = format!(
                 "diff base: {}",
-                if *base == DiffBase::Head { "HEAD" } else { "merge-base" }
+                if *base == DiffBase::Head {
+                    "HEAD"
+                } else {
+                    "merge-base"
+                }
             );
             refresh(app, *base, standalone);
         }
@@ -188,7 +205,9 @@ pub(crate) fn refresh(app: &mut App, base: DiffBase, standalone: bool) {
             app.set_multi_diff(groups);
             if app.all_files_mode {
                 app.all_files = gitio::ls_files(&root).unwrap_or_default();
-                app.selected_file = app.selected_file.min(app.tree_rows().len().saturating_sub(1));
+                app.selected_file = app
+                    .selected_file
+                    .min(app.tree_rows().len().saturating_sub(1));
             }
         }
         None => {
@@ -199,8 +218,14 @@ pub(crate) fn refresh(app: &mut App, base: DiffBase, standalone: bool) {
 }
 
 /// Label a repo by its dir name, disambiguating duplicates with the parent dir.
-fn repo_ref(root: &std::path::Path, taken: &[(app::RepoRef, Vec<crate::diff::FileDiff>)]) -> app::RepoRef {
-    let base = root.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+fn repo_ref(
+    root: &std::path::Path,
+    taken: &[(app::RepoRef, Vec<crate::diff::FileDiff>)],
+) -> app::RepoRef {
+    let base = root
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let label = if taken.iter().any(|(r, _)| r.label == base) {
         let parent = root
             .parent()
@@ -211,7 +236,10 @@ fn repo_ref(root: &std::path::Path, taken: &[(app::RepoRef, Vec<crate::diff::Fil
     } else {
         base
     };
-    app::RepoRef { root: root.to_path_buf(), label }
+    app::RepoRef {
+        root: root.to_path_buf(),
+        label,
+    }
 }
 
 /// Git roots of the files this window's agent edited, from the Claude Code
@@ -224,13 +252,19 @@ fn transcript_repo_roots(app: &App) -> Vec<PathBuf> {
     static CACHE: OnceLock<Mutex<Cache>> = OnceLock::new();
     const RECENT: Duration = Duration::from_secs(24 * 3600);
 
-    let Some(agent) = app.agent() else { return Vec::new() };
+    let Some(agent) = app.agent() else {
+        return Vec::new();
+    };
     if agent.agent != "claude" {
         return Vec::new();
     }
-    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else { return Vec::new() };
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return Vec::new();
+    };
     let dir = transcript::project_dir(&home, &agent.cwd);
-    let Ok(entries) = std::fs::read_dir(&dir) else { return Vec::new() };
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
     let now = std::time::SystemTime::now();
     let cache = CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
 
@@ -240,20 +274,29 @@ fn transcript_repo_roots(app: &App) -> Vec<PathBuf> {
         if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
             continue;
         }
-        let Ok(mtime) = entry.metadata().and_then(|m| m.modified()) else { continue };
-        if now.duration_since(mtime).map(|age| age > RECENT).unwrap_or(false) {
+        let Ok(mtime) = entry.metadata().and_then(|m| m.modified()) else {
+            continue;
+        };
+        if now
+            .duration_since(mtime)
+            .map(|age| age > RECENT)
+            .unwrap_or(false)
+        {
             continue;
         }
-        let cached = cache
-            .lock()
-            .ok()
-            .and_then(|g| g.get(&path).filter(|(t, _)| *t == mtime).map(|(_, r)| r.clone()));
+        let cached = cache.lock().ok().and_then(|g| {
+            g.get(&path)
+                .filter(|(t, _)| *t == mtime)
+                .map(|(_, r)| r.clone())
+        });
         let file_roots = match cached {
             Some(r) => r,
             None => {
                 let r: Vec<PathBuf> = std::fs::read_to_string(&path)
                     .map(|jsonl| {
-                        gitio::group_by_repo(&transcript::edited_files(&jsonl)).into_keys().collect()
+                        gitio::group_by_repo(&transcript::edited_files(&jsonl))
+                            .into_keys()
+                            .collect()
                     })
                     .unwrap_or_default();
                 if let Ok(mut guard) = cache.lock() {
@@ -276,7 +319,9 @@ pub(crate) fn repo_root_for(app: &App, standalone: bool) -> PathBuf {
     let cwd = if standalone {
         std::env::current_dir().unwrap_or_default()
     } else {
-        app.agent().map(|a| PathBuf::from(&a.cwd)).unwrap_or_default()
+        app.agent()
+            .map(|a| PathBuf::from(&a.cwd))
+            .unwrap_or_default()
     };
     gitio::repo_root(&cwd).unwrap_or(cwd)
 }
@@ -290,7 +335,11 @@ pub(crate) fn read_lines(full: &std::path::Path) -> Vec<String> {
     }
 }
 
-pub(crate) fn load_file_view(app: &App, path: &str, standalone: bool) -> (FileView, Vec<(Option<u32>, String)>) {
+pub(crate) fn load_file_view(
+    app: &App,
+    path: &str,
+    standalone: bool,
+) -> (FileView, Vec<(Option<u32>, String)>) {
     let file_idx = app.file_index_by_display(path);
     let (root, rel) = match file_idx {
         Some(i) => {
@@ -322,7 +371,10 @@ pub(crate) fn load_file_view(app: &App, path: &str, standalone: bool) -> (FileVi
     let mut lines = Vec::new();
     let mut model: Vec<(Option<u32>, String)> = Vec::new();
     let plain: Vec<String> = content.lines().map(str::to_string).collect();
-    for (i, (line, is_changed)) in highlight::highlight_file(path, &content, &changed).into_iter().enumerate() {
+    for (i, (line, is_changed)) in highlight::highlight_file(path, &content, &changed)
+        .into_iter()
+        .enumerate()
+    {
         let no = i as u32 + 1;
         if let Some(dels) = deletions.get(&no) {
             for t in dels {
@@ -330,23 +382,37 @@ pub(crate) fn load_file_view(app: &App, path: &str, standalone: bool) -> (FileVi
                 model.push((None, t.clone()));
             }
         }
-        lines.push(ui::FvLine::Content { line, changed: is_changed });
+        lines.push(ui::FvLine::Content {
+            line,
+            changed: is_changed,
+        });
         model.push((Some(no), plain.get(i).cloned().unwrap_or_default()));
     }
     // deletions anchored past the last content line (EOF deletions)
-    let n = lines.iter().filter(|l| matches!(l, ui::FvLine::Content { .. })).count() as u32;
+    let n = lines
+        .iter()
+        .filter(|l| matches!(l, ui::FvLine::Content { .. }))
+        .count() as u32;
     for (_, dels) in deletions.range(n + 1..) {
         for t in dels {
             lines.push(ui::FvLine::Deleted { text: t.clone() });
             model.push((None, t.clone()));
         }
     }
-    (FileView { path: path.to_string(), lines }, model)
+    (
+        FileView {
+            path: path.to_string(),
+            lines,
+        },
+        model,
+    )
 }
 
 pub(crate) fn spawn_socket_listener(tx: mpsc::Sender<AppEvent>) {
     std::thread::spawn(move || {
-        let Some(socket_path) = std::env::var_os("HERDR_SOCKET_PATH") else { return };
+        let Some(socket_path) = std::env::var_os("HERDR_SOCKET_PATH") else {
+            return;
+        };
         let mut backoff = 1u64;
         loop {
             if listen_once(&socket_path, &tx).is_ok() {
@@ -362,7 +428,10 @@ fn listen_once(socket_path: &std::ffi::OsStr, tx: &mpsc::Sender<AppEvent>) -> Re
     use std::io::Write;
     use std::os::unix::net::UnixStream;
 
-    let pane_ids: Vec<String> = herdr::agent_list()?.into_iter().map(|a| a.pane_id).collect();
+    let pane_ids: Vec<String> = herdr::agent_list()?
+        .into_iter()
+        .map(|a| a.pane_id)
+        .collect();
     if pane_ids.is_empty() {
         return Ok(());
     }

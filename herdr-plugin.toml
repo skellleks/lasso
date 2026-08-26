@@ -1,24 +1,24 @@
 id = "lasso"
 name = "Lasso"
 version = "0.1.0"
-min_herdr_version = "0.7.0"
+min_herdr_version = "0.7.5"
 description = "Review pane: agent diffs, inline comments back to the agent, file viewer"
 platforms = ["macos", "linux"]
 
 [[build]]
-command = ["cargo", "build", "--release"]
+command = ["sh", "scripts/fetch-or-build.sh"]
 
 [[startup]]
-command = ["./target/release/lasso", "--open-pane"]
+command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/bin/lasso\" --open-pane"]
 
 [[panes]]
 id = "review"
 title = "Lasso review"
 placement = "split"
-command = ["./target/release/lasso"]
+command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/bin/lasso\""]
 
 [[actions]]
 id = "open"
 title = "Open Lasso review"
 contexts = ["workspace"]
-command = ["./target/release/lasso", "--open-pane"]
+command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/bin/lasso\" --open-pane"]

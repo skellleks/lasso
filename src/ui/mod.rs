@@ -41,7 +41,11 @@ pub fn apply_bg_ranges(
         for ch in span.content.chars() {
             let marked = in_range(pos);
             if !buf.is_empty() && marked != buf_marked {
-                let style = if buf_marked { span.style.bg(bg) } else { span.style };
+                let style = if buf_marked {
+                    span.style.bg(bg)
+                } else {
+                    span.style
+                };
                 out.push(Span::styled(std::mem::take(&mut buf), style));
             }
             buf_marked = marked;
@@ -49,7 +53,11 @@ pub fn apply_bg_ranges(
             pos += 1;
         }
         if !buf.is_empty() {
-            let style = if buf_marked { span.style.bg(bg) } else { span.style };
+            let style = if buf_marked {
+                span.style.bg(bg)
+            } else {
+                span.style
+            };
             out.push(Span::styled(buf, style));
         }
     }
@@ -91,13 +99,22 @@ pub fn regions(area: Rect) -> crate::app::Regions {
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(3), Constraint::Min(3)])
         .split(cols[0]);
-    crate::app::Regions { agents: sidebar[0], files: sidebar[1], right: cols[1] }
+    crate::app::Regions {
+        agents: sidebar[0],
+        files: sidebar[1],
+        right: cols[1],
+    }
 }
 
 pub fn draw(f: &mut Frame, app: &App, file_view: &FileView) {
     let area = f.area();
     let r = regions(area);
-    let status = Rect { x: area.x, y: area.y + area.height.saturating_sub(1), width: area.width, height: 1 };
+    let status = Rect {
+        x: area.x,
+        y: area.y + area.height.saturating_sub(1),
+        width: area.width,
+        height: 1,
+    };
 
     draw_agents(f, app, r.agents);
     draw_files(f, app, r.files);
@@ -140,12 +157,26 @@ pub(super) fn status_badge(status: &str) -> Span<'static> {
 }
 
 pub(super) fn file_badge(app: &App, path: &str) -> Span<'static> {
-    match app.file_index_by_display(path).and_then(|i| app.files.get(i)).map(|f| &f.status) {
-        Some(crate::diff::FileStatus::Added) => Span::styled("A", Style::default().fg(Color::Green)),
-        Some(crate::diff::FileStatus::Deleted) => Span::styled("D", Style::default().fg(Color::Red)),
-        Some(crate::diff::FileStatus::Renamed) => Span::styled("R", Style::default().fg(Color::Magenta)),
-        Some(crate::diff::FileStatus::Binary) => Span::styled("B", Style::default().fg(Color::DarkGray)),
-        Some(crate::diff::FileStatus::Modified) => Span::styled("M", Style::default().fg(Color::Yellow)),
+    match app
+        .file_index_by_display(path)
+        .and_then(|i| app.files.get(i))
+        .map(|f| &f.status)
+    {
+        Some(crate::diff::FileStatus::Added) => {
+            Span::styled("A", Style::default().fg(Color::Green))
+        }
+        Some(crate::diff::FileStatus::Deleted) => {
+            Span::styled("D", Style::default().fg(Color::Red))
+        }
+        Some(crate::diff::FileStatus::Renamed) => {
+            Span::styled("R", Style::default().fg(Color::Magenta))
+        }
+        Some(crate::diff::FileStatus::Binary) => {
+            Span::styled("B", Style::default().fg(Color::DarkGray))
+        }
+        Some(crate::diff::FileStatus::Modified) => {
+            Span::styled("M", Style::default().fg(Color::Yellow))
+        }
         None => Span::raw(" "),
     }
 }

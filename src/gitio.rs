@@ -44,7 +44,10 @@ pub fn full_diff(root: &Path, base: DiffBase) -> Result<Vec<FileDiff>> {
 
 /// Tracked + untracked (gitignore honored), repo-relative, sorted.
 pub fn ls_files(root: &Path) -> Result<Vec<String>> {
-    let out = git(root, &["ls-files", "--cached", "--others", "--exclude-standard"])?;
+    let out = git(
+        root,
+        &["ls-files", "--cached", "--others", "--exclude-standard"],
+    )?;
     let mut files: Vec<String> = out.lines().map(str::to_string).collect();
     files.sort();
     files.dedup();
@@ -98,10 +101,13 @@ fn synthesize_added(root: &Path, path: &str) -> FileDiff {
 
 /// Group absolute file paths by the git repo containing them; paths outside
 /// any repo are dropped. Keys are repo roots.
-pub fn group_by_repo(paths: &std::collections::BTreeSet<String>) -> std::collections::BTreeMap<PathBuf, Vec<String>> {
+pub fn group_by_repo(
+    paths: &std::collections::BTreeSet<String>,
+) -> std::collections::BTreeMap<PathBuf, Vec<String>> {
     let mut root_cache: std::collections::BTreeMap<PathBuf, Option<PathBuf>> =
         std::collections::BTreeMap::new();
-    let mut out: std::collections::BTreeMap<PathBuf, Vec<String>> = std::collections::BTreeMap::new();
+    let mut out: std::collections::BTreeMap<PathBuf, Vec<String>> =
+        std::collections::BTreeMap::new();
     for path in paths {
         let p = Path::new(path);
         let Some(dir) = p.parent() else { continue };
@@ -143,7 +149,12 @@ mod tests {
                 .env("GIT_COMMITTER_EMAIL", "t@t")
                 .output()
                 .unwrap();
-            assert!(ok.status.success(), "git {:?}: {}", args, String::from_utf8_lossy(&ok.stderr));
+            assert!(
+                ok.status.success(),
+                "git {:?}: {}",
+                args,
+                String::from_utf8_lossy(&ok.stderr)
+            );
         };
         run(&["init", "-q", "-b", "main"]);
         std::fs::write(dir.path().join("a.txt"), "one\ntwo\n").unwrap();
@@ -158,7 +169,10 @@ mod tests {
         let sub = dir.path().join("sub");
         std::fs::create_dir(&sub).unwrap();
         let root = repo_root(&sub).unwrap();
-        assert_eq!(root.canonicalize().unwrap(), dir.path().canonicalize().unwrap());
+        assert_eq!(
+            root.canonicalize().unwrap(),
+            dir.path().canonicalize().unwrap()
+        );
     }
 
     #[test]
@@ -210,7 +224,17 @@ mod tests {
         std::fs::write(dir.path().join("feat.txt"), "x\n").unwrap();
         run(&["add", "."]);
         let _ = Command::new("git")
-            .args(["-C", dir.path().to_str().unwrap(), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "feat"])
+            .args([
+                "-C",
+                dir.path().to_str().unwrap(),
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-qm",
+                "feat",
+            ])
             .output()
             .unwrap();
         // committed on branch: invisible vs HEAD, visible vs merge-base with main

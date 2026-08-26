@@ -35,18 +35,44 @@ pub fn visible_rows(paths: &[String], collapsed: &BTreeSet<String>) -> Vec<TreeR
         }
     }
 
-    fn walk(node: &Node, prefix: &str, depth: usize, collapsed: &BTreeSet<String>, out: &mut Vec<TreeRow>) {
+    fn walk(
+        node: &Node,
+        prefix: &str,
+        depth: usize,
+        collapsed: &BTreeSet<String>,
+        out: &mut Vec<TreeRow>,
+    ) {
         for (name, child) in &node.dirs {
-            let path = if prefix.is_empty() { name.clone() } else { format!("{prefix}/{name}") };
+            let path = if prefix.is_empty() {
+                name.clone()
+            } else {
+                format!("{prefix}/{name}")
+            };
             let expanded = !collapsed.contains(&path);
-            out.push(TreeRow { depth, name: name.clone(), path: path.clone(), is_dir: true, expanded });
+            out.push(TreeRow {
+                depth,
+                name: name.clone(),
+                path: path.clone(),
+                is_dir: true,
+                expanded,
+            });
             if expanded {
                 walk(child, &path, depth + 1, collapsed, out);
             }
         }
         for name in &node.files {
-            let path = if prefix.is_empty() { name.clone() } else { format!("{prefix}/{name}") };
-            out.push(TreeRow { depth, name: name.clone(), path, is_dir: false, expanded: false });
+            let path = if prefix.is_empty() {
+                name.clone()
+            } else {
+                format!("{prefix}/{name}")
+            };
+            out.push(TreeRow {
+                depth,
+                name: name.clone(),
+                path,
+                is_dir: false,
+                expanded: false,
+            });
         }
     }
 
@@ -60,17 +86,25 @@ mod tests {
     use super::*;
 
     fn paths() -> Vec<String> {
-        ["src/main.rs", "src/ui/mod.rs", "README.md", "src/app.rs", "Cargo.toml"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect()
+        [
+            "src/main.rs",
+            "src/ui/mod.rs",
+            "README.md",
+            "src/app.rs",
+            "Cargo.toml",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
     }
 
     #[test]
     fn builds_tree_dirs_first_alphabetical() {
         let rows = visible_rows(&paths(), &BTreeSet::new());
-        let names: Vec<(usize, &str, bool)> =
-            rows.iter().map(|r| (r.depth, r.name.as_str(), r.is_dir)).collect();
+        let names: Vec<(usize, &str, bool)> = rows
+            .iter()
+            .map(|r| (r.depth, r.name.as_str(), r.is_dir))
+            .collect();
         assert_eq!(
             names,
             vec![
@@ -101,7 +135,10 @@ mod tests {
         let collapsed = BTreeSet::from(["src/ui".to_string()]);
         let rows = visible_rows(&paths(), &collapsed);
         let names: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
-        assert_eq!(names, vec!["src", "ui", "app.rs", "main.rs", "Cargo.toml", "README.md"]);
+        assert_eq!(
+            names,
+            vec!["src", "ui", "app.rs", "main.rs", "Cargo.toml", "README.md"]
+        );
     }
 
     #[test]

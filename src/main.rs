@@ -21,8 +21,8 @@ use crossterm::event::{
 use app::{App, Mouse};
 use gitio::DiffBase;
 use runtime::{
-    apply_action, open_pane, read_lines, refresh, repo_root_for, spawn_socket_listener,
-    state_dir, to_char, AppEvent,
+    apply_action, open_pane, read_lines, refresh, repo_root_for, spawn_socket_listener, state_dir,
+    to_char, AppEvent,
 };
 use ui::FileView;
 
@@ -142,7 +142,9 @@ fn run_tui() -> Result<()> {
                     if k.code == KeyCode::Char('c') && k.modifiers.contains(KeyModifiers::CONTROL) {
                         break;
                     }
-                    let Some(ch) = to_char(k.code, app.modal.is_some()) else { continue };
+                    let Some(ch) = to_char(k.code, app.modal.is_some()) else {
+                        continue;
+                    };
                     let action = app.handle_key(ch);
                     if apply_action(action, &mut app, &mut base, &mut file_view, standalone) {
                         break;
