@@ -36,7 +36,11 @@ impl Agent {
 
     /// Short label for the sidebar: last path component of cwd.
     pub fn label(&self) -> &str {
-        self.cwd.rsplit('/').next().filter(|s| !s.is_empty()).unwrap_or(&self.cwd)
+        self.cwd
+            .rsplit('/')
+            .next()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&self.cwd)
     }
 }
 
@@ -60,7 +64,10 @@ pub fn parse_agent_list(json: &str) -> Result<Vec<Agent>> {
     if let Some(err) = env.error {
         bail!("herdr error: {err}");
     }
-    Ok(env.result.context("agent list response has no result")?.agents)
+    Ok(env
+        .result
+        .context("agent list response has no result")?
+        .agents)
 }
 
 /// One NDJSON request line subscribing to status changes for the given panes.
@@ -139,7 +146,11 @@ pub fn parse_pane_ids_by_label(json: &str, label: &str) -> Vec<String> {
             panes
                 .iter()
                 .filter(|p| p.get("label").and_then(|l| l.as_str()) == Some(label))
-                .filter_map(|p| p.get("pane_id").and_then(|id| id.as_str()).map(str::to_string))
+                .filter_map(|p| {
+                    p.get("pane_id")
+                        .and_then(|id| id.as_str())
+                        .map(str::to_string)
+                })
                 .collect()
         })
         .unwrap_or_default()
@@ -147,7 +158,9 @@ pub fn parse_pane_ids_by_label(json: &str, label: &str) -> Vec<String> {
 
 /// Path to the herdr binary: HERDR_BIN_PATH, or "herdr" from PATH.
 pub fn herdr_bin() -> PathBuf {
-    std::env::var_os("HERDR_BIN_PATH").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("herdr"))
+    std::env::var_os("HERDR_BIN_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("herdr"))
 }
 
 pub fn agent_list() -> Result<Vec<Agent>> {
@@ -156,7 +169,10 @@ pub fn agent_list() -> Result<Vec<Agent>> {
         .output()
         .context("failed to run herdr agent list")?;
     if !out.status.success() {
-        bail!("herdr agent list failed: {}", String::from_utf8_lossy(&out.stderr));
+        bail!(
+            "herdr agent list failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
     parse_agent_list(&String::from_utf8_lossy(&out.stdout))
 }
@@ -167,7 +183,10 @@ pub fn agent_prompt(pane_id: &str, text: &str) -> Result<()> {
         .output()
         .context("failed to run herdr agent prompt")?;
     if !out.status.success() {
-        bail!("herdr agent prompt failed: {}", String::from_utf8_lossy(&out.stderr));
+        bail!(
+            "herdr agent prompt failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
     Ok(())
 }
@@ -194,7 +213,10 @@ mod tests {
         assert_eq!(agents[0].cwd, "/repo/api");
         assert_eq!(agents[0].terminal_title_stripped, "fix login");
         let session = agents[0].agent_session.as_ref().unwrap();
-        assert_eq!((session.kind.as_str(), session.value.as_str()), ("id", "abc-123"));
+        assert_eq!(
+            (session.kind.as_str(), session.value.as_str()),
+            ("id", "abc-123")
+        );
         assert!(agents[1].agent_session.is_none());
         assert_eq!(agents[1].agent, "codex");
     }
@@ -262,11 +284,20 @@ mod tests {
             .unwrap()
         };
         let agents = vec![mk("w1:p1", "w1"), mk("w2:p5", "w2")];
-        assert_eq!(resolve_pin(&agents, Some("w2:p5"), None), Some("w2:p5".into()));
+        assert_eq!(
+            resolve_pin(&agents, Some("w2:p5"), None),
+            Some("w2:p5".into())
+        );
         // pane not an agent → first agent of the workspace
-        assert_eq!(resolve_pin(&agents, Some("w2:p9"), Some("w2")), Some("w2:p5".into()));
+        assert_eq!(
+            resolve_pin(&agents, Some("w2:p9"), Some("w2")),
+            Some("w2:p5".into())
+        );
         // nothing matches → first agent overall
-        assert_eq!(resolve_pin(&agents, Some("w9:p9"), Some("w9")), Some("w1:p1".into()));
+        assert_eq!(
+            resolve_pin(&agents, Some("w9:p9"), Some("w9")),
+            Some("w1:p1".into())
+        );
         assert_eq!(resolve_pin(&[], Some("w1:p1"), None), None);
     }
 
@@ -285,14 +316,19 @@ mod tests {
             {"pane_id":"w3:p9","label":"Lasso review"},
             {"pane_id":"w3:p2","label":"other"}
         ]}}"#;
-        assert_eq!(parse_pane_ids_by_label(json, "Lasso review"), vec!["w2:pK", "w3:p9"]);
+        assert_eq!(
+            parse_pane_ids_by_label(json, "Lasso review"),
+            vec!["w2:pK", "w3:p9"]
+        );
         assert!(parse_pane_ids_by_label("garbage", "Lasso review").is_empty());
     }
 
     #[test]
     fn ignores_other_lines() {
         assert!(parse_event_line(r#"{"id":"sub-1","result":{"ok":true}}"#).is_none());
-        assert!(parse_event_line(r#"{"event":"pane.closed","data":{"pane_id":"w1:p9"}}"#).is_none());
+        assert!(
+            parse_event_line(r#"{"event":"pane.closed","data":{"pane_id":"w1:p9"}}"#).is_none()
+        );
         assert!(parse_event_line("garbage").is_none());
     }
 }

@@ -54,7 +54,9 @@ pub fn parse(input: &str) -> Vec<FileDiff> {
             });
             continue;
         }
-        let Some(file) = files.last_mut() else { continue };
+        let Some(file) = files.last_mut() else {
+            continue;
+        };
 
         if line.starts_with("new file mode") {
             file.status = FileStatus::Added;
@@ -115,7 +117,8 @@ pub fn parse(input: &str) -> Vec<FileDiff> {
 /// Deleted lines (full `DiffLine`s) grouped by the new-file line number they
 /// precede. A deletion at end of file anchors to `last_new_no + 1`.
 pub fn deleted_lines_by_anchor(file: &FileDiff) -> std::collections::BTreeMap<u32, Vec<DiffLine>> {
-    let mut anchors: std::collections::BTreeMap<u32, Vec<DiffLine>> = std::collections::BTreeMap::new();
+    let mut anchors: std::collections::BTreeMap<u32, Vec<DiffLine>> =
+        std::collections::BTreeMap::new();
     for hunk in &file.hunks {
         let mut pending: Vec<DiffLine> = Vec::new();
         let mut last_new: Option<u32> = None;
@@ -191,12 +194,23 @@ pub fn word_diff_ranges(old: &str, new: &str) -> (CharRanges, CharRanges) {
     }
     // gate: emphasize only when the lines genuinely share content
     let solid = |t: &(usize, usize, String)| !t.2.trim().is_empty();
-    let matched = ot.iter().zip(&old_keep).filter(|(t, k)| **k && solid(t)).count();
-    let base = ot.iter().filter(|t| solid(t)).count().max(nt.iter().filter(|t| solid(t)).count());
+    let matched = ot
+        .iter()
+        .zip(&old_keep)
+        .filter(|(t, k)| **k && solid(t))
+        .count();
+    let base = ot
+        .iter()
+        .filter(|t| solid(t))
+        .count()
+        .max(nt.iter().filter(|t| solid(t)).count());
     if base > 0 && matched * 2 < base {
         return (Vec::new(), Vec::new());
     }
-    (collect_ranges(&ot, &old_keep), collect_ranges(&nt, &new_keep))
+    (
+        collect_ranges(&ot, &old_keep),
+        collect_ranges(&nt, &new_keep),
+    )
 }
 
 /// (char start, char end, text) tokens: identifier runs, whitespace runs,
@@ -239,7 +253,9 @@ fn collect_ranges(tokens: &[(usize, usize, String)], keep: &[bool]) -> Vec<(usiz
     }
     // drop pure-whitespace ranges
     ranges.retain(|&(a, b)| {
-        tokens.iter().any(|t| t.0 >= a && t.1 <= b && !t.2.trim().is_empty())
+        tokens
+            .iter()
+            .any(|t| t.0 >= a && t.1 <= b && !t.2.trim().is_empty())
     });
     ranges
 }
@@ -250,9 +266,17 @@ fn parse_hunk_header(header: &str) -> (u32, u32) {
     let mut new = 0;
     for tok in header.split_whitespace() {
         if let Some(spec) = tok.strip_prefix('-') {
-            old = spec.split(',').next().and_then(|s| s.parse().ok()).unwrap_or(0);
+            old = spec
+                .split(',')
+                .next()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
         } else if let Some(spec) = tok.strip_prefix('+') {
-            new = spec.split(',').next().and_then(|s| s.parse().ok()).unwrap_or(0);
+            new = spec
+                .split(',')
+                .next()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
             break;
         }
     }
@@ -441,7 +465,10 @@ index 1111111..2222222 100644
         let (old_r, new_r) = word_diff_ranges("    return None", "    return user");
         assert!(covered(&old_r, "    return None", "None"), "{old_r:?}");
         assert!(covered(&new_r, "    return user", "user"), "{new_r:?}");
-        assert!(!covered(&old_r, "    return None", "return"), "unchanged token not marked");
+        assert!(
+            !covered(&old_r, "    return None", "return"),
+            "unchanged token not marked"
+        );
     }
 
     #[test]
@@ -460,7 +487,10 @@ index 1111111..2222222 100644
     #[test]
     fn word_diff_unrelated_lines_mark_nothing() {
         let (old_r, new_r) = word_diff_ranges("abc def", "xyz uvw qrs");
-        assert!(old_r.is_empty() && new_r.is_empty(), "no noise on full rewrites");
+        assert!(
+            old_r.is_empty() && new_r.is_empty(),
+            "no noise on full rewrites"
+        );
     }
 
     #[test]

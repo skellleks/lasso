@@ -42,7 +42,11 @@ pub fn highlight_line(path: &str, text: &str) -> Vec<Span<'static>> {
 }
 
 /// Highlight `content`, marking line numbers in `changed` (1-based).
-pub fn highlight_file(path: &str, content: &str, changed: &BTreeSet<u32>) -> Vec<(Line<'static>, bool)> {
+pub fn highlight_file(
+    path: &str,
+    content: &str,
+    changed: &BTreeSet<u32>,
+) -> Vec<(Line<'static>, bool)> {
     let ss = syntax_set();
     let syntax = std::path::Path::new(path)
         .extension()
@@ -82,7 +86,11 @@ fn boost(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
     let avg = (r + g + b) / 3.0;
     let sat = |c: f32| (avg + (c - avg) * 1.6).clamp(0.0, 255.0);
     let bright = |c: f32| (c * 1.12).clamp(0.0, 255.0);
-    (bright(sat(r)) as u8, bright(sat(g)) as u8, bright(sat(b)) as u8)
+    (
+        bright(sat(r)) as u8,
+        bright(sat(g)) as u8,
+        bright(sat(b)) as u8,
+    )
 }
 
 #[cfg(test)]
@@ -92,7 +100,12 @@ mod tests {
     fn texts(lines: &[(Line<'static>, bool)]) -> Vec<String> {
         lines
             .iter()
-            .map(|(l, _)| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
+            .map(|(l, _)| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+            })
             .collect()
     }
 
@@ -108,7 +121,10 @@ mod tests {
     #[test]
     fn python_line_gets_multiple_style_spans() {
         let out = highlight_file("x.py", "def f(x):\n", &BTreeSet::new());
-        assert!(out[0].0.spans.len() > 1, "syntax highlighting produced styled spans");
+        assert!(
+            out[0].0.spans.len() > 1,
+            "syntax highlighting produced styled spans"
+        );
     }
 
     #[test]
@@ -126,7 +142,10 @@ mod tests {
     fn boost_saturates_muted_colors_but_keeps_grays() {
         // muted green from base16: spread between channels must grow
         let (r, g, b) = boost(163, 190, 140);
-        assert!(g as i32 - r as i32 > 190 - 163, "more saturated: {r},{g},{b}");
+        assert!(
+            g as i32 - r as i32 > 190 - 163,
+            "more saturated: {r},{g},{b}"
+        );
         assert!(g >= 190, "not darker");
         // pure gray stays gray
         let (r, g, b) = boost(128, 128, 128);

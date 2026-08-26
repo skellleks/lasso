@@ -13,7 +13,9 @@ pub fn edited_files(jsonl: &str) -> BTreeSet<String> {
         if !line.contains("\"tool_use\"") || !line.contains("file_path") {
             continue;
         }
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
         let Some(content) = v.pointer("/message/content").and_then(|c| c.as_array()) else {
             continue;
         };
@@ -63,7 +65,10 @@ not json at all
         let files = edited_files(jsonl);
         assert_eq!(
             files.into_iter().collect::<Vec<_>>(),
-            vec!["/repo/a/src/main.rs".to_string(), "/repo/b/README.md".to_string()],
+            vec![
+                "/repo/a/src/main.rs".to_string(),
+                "/repo/b/README.md".to_string()
+            ],
             "dedup, Bash ignored, bad lines skipped"
         );
     }
@@ -77,10 +82,14 @@ not json at all
     #[test]
     fn project_dir_munges_cwd_like_claude_code() {
         assert_eq!(
-            project_dir(std::path::Path::new("/Users/admin"), "/Users/admin/Documents/work/mono/digital_goods"),
-            PathBuf::from("/Users/admin/.claude/projects/-Users-admin-Documents-work-mono-digital-goods"),
+            project_dir(
+                std::path::Path::new("/Users/admin"),
+                "/Users/admin/Documents/work/mono/digital_goods"
+            ),
+            PathBuf::from(
+                "/Users/admin/.claude/projects/-Users-admin-Documents-work-mono-digital-goods"
+            ),
             "underscores are munged too"
         );
     }
-
 }
