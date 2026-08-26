@@ -154,7 +154,7 @@ const ADD_BG: Color = Color::Rgb(6, 43, 3);
 const DEL_BG: Color = Color::Rgb(62, 3, 1);
 const CUR_ADD_BG: Color = Color::Rgb(14, 68, 8);
 const CUR_DEL_BG: Color = Color::Rgb(92, 10, 6);
-const CUR_CTX_BG: Color = Color::Rgb(38, 44, 56);
+const CUR_CTX_BG: Color = Color::Rgb(67, 76, 94);
 /// Brighter fills for the exact tokens that changed within a line pair.
 const ADD_EM_BG: Color = Color::Rgb(24, 110, 18);
 const DEL_EM_BG: Color = Color::Rgb(150, 24, 16);
